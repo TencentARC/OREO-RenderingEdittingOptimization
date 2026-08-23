@@ -49,6 +49,7 @@ These entries harden or verify the retained release path; they are not code-remo
 | --- | --- | --- |
 | `fix: require full dual-stage checkpoint loading` | Added an explicit import-light loader for the flat Accelerate Dual-Stage checkpoint and made Dense FlowEdit evaluation fail on incomplete loads or unchanged student weights | `model.safetensors` loads strictly into `slat_flow_model`; `model_1.safetensors` loads strictly into `sparse_structure_flow_model`; both parameter sets must exactly match their corresponding teacher/base keys and shapes and differ above threshold. Eval-only registration preserves sparse → dense Accelerate model order even when the dense optimizer object is absent. The mapping, load counts, and both parameter-difference reports are written to the evaluation metadata. Covered by `python3 -m unittest tests.test_trellis_full_dual_checkpoint`. |
 | `fix: define dual-stage single-node run name` | Defined the retained single-node Dual-Stage launcher's run name before its first use | The launcher defaults to `trellis_dualstage_contrastive_single`, preserves a caller-supplied non-empty `RUN_NAME`, and passes the value to the config as a quoted argument. |
+| `docs: record full dual-stage smoke verification` | Ran an isolated one-GPU smoke on the existing H200 Debug Pod with commit `3c5e733966aef18c8755c6e17c78633af85d877f` and `checkpoint_10_3157` | Result: `PASS`. The strict load report records 526 tensors / 600,432,520 elements from `model.safetensors` into `slat_flow_model`, and 489 tensors / 559,737,864 elements from `model_1.safetensors` into `sparse_structure_flow_model`. Student/base comparison found 526/526 differing slat parameters (`max_abs_diff=0.0697021484375`) and 488/488 differing sparse-structure parameters (`max_abs_diff=0.02215576171875`), with exact key and shape coverage. Eight non-empty teacher outputs and eight non-empty student outputs were generated. Artifacts are isolated at `s3://arcwm-code-us-west-2/ericzyma/oreo-verification/debug-full-dual-smoke-3c5e733-20260824-002000/`, including `smoke_summary.json` and `flowedit_params.json`. |
 
 ## Planned cleanup batches
 
@@ -83,5 +84,6 @@ and documentation before removal.
 
 ## Publishing status
 
-- Private Gongfeng: baseline uploaded; cleanup branch is being prepared.
+- Private Gongfeng: baseline and reviewed verification fixes are uploaded on
+  `cleanup/dual-stage-release`; no merge to `main` has been performed.
 - Public GitHub: intentionally deferred.
