@@ -39,6 +39,7 @@ for exact paths and this table for the reason and compatibility impact.
 | Commit | Area removed | Reason | Retained behavior / impact |
 | --- | --- | --- | --- |
 | `cleanup: remove standalone stage-2-only entry points` | Standalone Stage-2-only configuration, training entry point, and multi-node/single-node launchers | The public release exposes only the Dual-Stage Contrastive FlowEdit algorithm; these files duplicated a standalone interface outside that contract | Dual-Stage configuration, entry point, and launchers remain. Shared sparse-stage computation in `autograd_template.py` and operations in `stage_ops.py` remain available to the Dual-Stage path. |
+| `cleanup: remove Hunyuan3D generator` | Vendored Hunyuan3D generator implementation and its standalone launchers | Repository-wide consumer tracing found no import or dynamic path from the retained Dual-Stage implementation; the launchers referenced absent training and configuration files | TRELLIS Dual-Stage training, inference, shared stage operations, and evaluation remain. Hunyuan3D-specific `pymeshlab` and `scikit-image` dependencies were removed. |
 
 ## Planned cleanup batches
 

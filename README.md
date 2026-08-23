@@ -1,6 +1,6 @@
-# Hunyuan3D Flow-GRPO
+# OREO: Dual-Stage Contrastive FlowEdit
 
-基于 Flow-GRPO 框架的 Hunyuan3D 训练代码。
+面向 TRELLIS 的 Dual-Stage Contrastive FlowEdit 训练与评测代码。
 
 ## 环境配置
 
@@ -18,17 +18,6 @@ pip install -r requirements.txt
 ### 2. 下载预训练模型
 
 #### 2.1 3D Generators
-
-##### Hunyuan3D
-```bash
-# 可选登录（如需访问私有/受限资源）
-# huggingface-cli login
-
-python scripts/download/download_hunyuan3d_weights.py
-```
-- 默认路径：`pretrained_weights/tencent/Hunyuan3D-2.1/`
-  - DiT：`hunyuan3d-dit-v2-1/`
-  - VAE：`hunyuan3d-vae-v2-1/`
 
 ##### Trellis
 - 当前实现无需单独下载权重（随代码使用内置/引用模型）。
