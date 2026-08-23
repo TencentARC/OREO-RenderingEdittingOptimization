@@ -48,6 +48,7 @@ These entries harden or verify the retained release path; they are not code-remo
 | Commit | Verification hardening | Evidence / enforced contract |
 | --- | --- | --- |
 | `fix: require full dual-stage checkpoint loading` | Added an explicit import-light loader for the flat Accelerate Dual-Stage checkpoint and made Dense FlowEdit evaluation fail on incomplete loads or unchanged student weights | `model.safetensors` loads strictly into `slat_flow_model`; `model_1.safetensors` loads strictly into `sparse_structure_flow_model`; both parameter sets must exactly match their corresponding teacher/base keys and shapes and differ above threshold. Eval-only registration preserves sparse → dense Accelerate model order even when the dense optimizer object is absent. The mapping, load counts, and both parameter-difference reports are written to the evaluation metadata. Covered by `python3 -m unittest tests.test_trellis_full_dual_checkpoint`. |
+| `fix: define dual-stage single-node run name` | Defined the retained single-node Dual-Stage launcher's run name before its first use | The launcher defaults to `trellis_dualstage_contrastive_single`, preserves a caller-supplied non-empty `RUN_NAME`, and passes the value to the config as a quoted argument. |
 
 ## Planned cleanup batches
 
