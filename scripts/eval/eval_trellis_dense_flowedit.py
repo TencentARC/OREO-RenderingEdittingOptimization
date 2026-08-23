@@ -63,6 +63,10 @@ from edit4shape.generators.trellis.state import TrellisState
 from edit4shape.generators.trellis.rollout import rollout_sparse, rollout_dense
 from edit4shape.generators.trellis.rollout.flowedit import rollout_dense_flowedit
 from edit4shape.systems.trellis.forward import decode_and_render_gs, decode_and_render_mesh
+from edit4shape.systems.trellis.checkpoint import (
+    load_full_dual_checkpoint,
+    validate_student_diff,
+)
 from edit4shape.guidance import create_guidance
 from edit4shape.systems.utils import composite_alpha_to_white
 from edit4shape.guidance.metric.clip import CLIPMetric
@@ -412,81 +416,41 @@ def main(argv) -> None:
 
     # ---- 加载 finetuned checkpoint ----
     ckpt_path = cfg.get("checkpoint", "")
-    has_dense_ckpt = False
+    checkpoint_load_report: Optional[Dict[str, Any]] = None
+    parameter_diff_reports: List[Dict[str, Any]] = []
     if ckpt_path:
-        from safetensors.torch import load_file
-        root = Path(ckpt_path)
+        pipe_models = system.pipeline.pipe.models
+        checkpoint_load_report = load_full_dual_checkpoint(
+            ckpt_path,
+            slat_flow_model=pipe_models["slat_flow_model"],
+            sparse_structure_flow_model=pipe_models["sparse_structure_flow_model"],
+        )
+        for stage_report in checkpoint_load_report["stages"]:
+            logger.info("[Checkpoint] %s", json.dumps(stage_report, sort_keys=True))
 
-        # 支持三种 checkpoint 格式：
-        #   A) 扁平双阶段：root/model.safetensors (sparse) + root/model_1.safetensors (dense)
-        #   B) 子目录双阶段：root/model_0/model.safetensors (sparse) + root/model_1/model.safetensors (dense)
-        #   C) 扁平单阶段：root/model.safetensors (sparse only)
-        subdir_dual = (root / "model_0").is_dir()
-        flat_dense = (root / "model_1.safetensors").exists()
-
-        if subdir_dual:
-            sparse_path = root / "model_0" / "model.safetensors"
-            dense_path: Optional[Path] = root / "model_1" / "model.safetensors"
-        elif flat_dense:
-            sparse_path = root / "model.safetensors"
-            dense_path = root / "model_1.safetensors"
-        else:
-            sparse_path = root / "model.safetensors"
-            dense_path = None
-
-        # 加载 sparse student
-        if sparse_path.exists():
-            state_dict = load_file(str(sparse_path), device="cpu")
-            system.strategy.student.load_state_dict(state_dict)
-            logger.info(f"[Checkpoint] Sparse student 权重已从 {sparse_path} 加载")
-        else:
-            logger.error(f"[Checkpoint] 未找到 {sparse_path}")
-
-        # 加载 dense student（若存在）
-        if dense_path is not None and dense_path.exists():
-            dense_state = load_file(str(dense_path), device="cpu")
-            ss_model = system.pipeline.pipe.models["sparse_structure_flow_model"]
-            if hasattr(ss_model, "module"):
-                ss_model = ss_model.module
-            ss_model.load_state_dict(dense_state)
-            has_dense_ckpt = True
-            logger.info(f"[Checkpoint] Dense student 权重已从 {dense_path} 加载")
-        else:
-            logger.warning("[Checkpoint] 未找到 dense 权重，dense student 使用 pretrained 权重")
+        sparse_teacher = getattr(system.strategy, "_sparse_teacher", None)
+        dense_teacher = getattr(system.strategy, "_dense_teacher", None)
+        if sparse_teacher is None or dense_teacher is None:
+            raise RuntimeError(
+                "full Dual-Stage checkpoint validation requires both sparse and dense "
+                "base/teacher models"
+            )
+        parameter_diff_reports = [
+            validate_student_diff(
+                pipe_models["slat_flow_model"],
+                sparse_teacher,
+                target="slat_flow_model",
+            ),
+            validate_student_diff(
+                pipe_models["sparse_structure_flow_model"],
+                dense_teacher,
+                target="sparse_structure_flow_model",
+            ),
+        ]
+        for diff_report in parameter_diff_reports:
+            logger.info("[ParamCheck] %s", json.dumps(diff_report, sort_keys=True))
     else:
         logger.warning("[Checkpoint] 未指定 checkpoint，student 使用 pretrained 权重（与 teacher 相同）")
-
-    # ---- 参数差异检查：确认 student ≠ teacher ----
-    def _param_diff_check(label, student_model, teacher_model):
-        student_params = dict(student_model.named_parameters())
-        n_diff, n_total, max_diff = 0, 0, 0.0
-        for pname, t_param in teacher_model.named_parameters():
-            s_param = student_params.get(pname)
-            if s_param is not None:
-                n_total += 1
-                diff = (s_param.data.float() - t_param.data.float()).abs().max().item()
-                if diff > 1e-8:
-                    n_diff += 1
-                max_diff = max(max_diff, diff)
-        if n_diff == 0:
-            logger.error(
-                f"[ParamCheck-{label}] Student 与 Teacher 参数完全相同！"
-                f"（{n_total} 层，max_diff={max_diff:.2e}）→ checkpoint 可能未正确加载"
-            )
-        else:
-            logger.info(
-                f"[ParamCheck-{label}] Student 与 Teacher 有 {n_diff}/{n_total} 层参数不同，"
-                f"max_diff={max_diff:.2e}"
-            )
-
-    if is_main and system.strategy.has_teacher:
-        _param_diff_check("Sparse", system.strategy.student, system.strategy._sparse_teacher)
-        if has_dense_ckpt and hasattr(system.strategy, "_dense_teacher"):
-            _param_diff_check(
-                "Dense",
-                system.pipeline.pipe.models["sparse_structure_flow_model"],
-                system.strategy._dense_teacher,
-            )
 
     # ---- 输出目录 ----
     run_root = Path(cfg.logdir) / (cfg.run_name or "run")
@@ -506,7 +470,9 @@ def main(argv) -> None:
                 "cfg_scale_tgt": float(fe_cfg.cfg_scale_tgt),
                 "cfg_scale_src": float(fe_cfg.cfg_scale_src),
                 "checkpoint": ckpt_path,
-                "has_dense_ckpt": has_dense_ckpt,
+                "has_dense_ckpt": checkpoint_load_report is not None,
+                "checkpoint_load_report": checkpoint_load_report,
+                "parameter_diff_reports": parameter_diff_reports,
             }, f, indent=2)
     _dist_barrier(local_rank)
 
@@ -537,6 +503,7 @@ def main(argv) -> None:
 
     with inference_ctx, EvalModeGuard(
         pipe_models["slat_flow_model"],
+        pipe_models["sparse_structure_flow_model"],
         pipe_models["slat_decoder_mesh"],
         pipe_models["slat_decoder_gs"],
     ):

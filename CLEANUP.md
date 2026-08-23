@@ -41,6 +41,14 @@ for exact paths and this table for the reason and compatibility impact.
 | `cleanup: remove standalone stage-2-only entry points` | Standalone Stage-2-only configuration, training entry point, and multi-node/single-node launchers | The public release exposes only the Dual-Stage Contrastive FlowEdit algorithm; these files duplicated a standalone interface outside that contract | Dual-Stage configuration, entry point, and launchers remain. Shared sparse-stage computation in `autograd_template.py` and operations in `stage_ops.py` remain available to the Dual-Stage path. |
 | `cleanup: remove Hunyuan3D generator` | Vendored Hunyuan3D generator implementation and its standalone launchers | Repository-wide consumer tracing found no import or dynamic path from the retained Dual-Stage implementation; the launchers referenced absent training and configuration files | TRELLIS Dual-Stage training, inference, shared stage operations, and evaluation remain. Hunyuan3D-specific `pymeshlab` and `scikit-image` dependencies were removed. |
 
+## Verification ledger
+
+These entries harden or verify the retained release path; they are not code-removal claims.
+
+| Commit | Verification hardening | Evidence / enforced contract |
+| --- | --- | --- |
+| `fix: require full dual-stage checkpoint loading` | Added an explicit import-light loader for the flat Accelerate Dual-Stage checkpoint and made Dense FlowEdit evaluation fail on incomplete loads or unchanged student weights | `model.safetensors` loads strictly into `slat_flow_model`; `model_1.safetensors` loads strictly into `sparse_structure_flow_model`; both parameter sets must exactly match their corresponding teacher/base keys and shapes and differ above threshold. Eval-only registration preserves sparse → dense Accelerate model order even when the dense optimizer object is absent. The mapping, load counts, and both parameter-difference reports are written to the evaluation metadata. Covered by `python3 -m unittest tests.test_trellis_full_dual_checkpoint`. |
+
 ## Planned cleanup batches
 
 These are candidates, not proof that the files are safe to delete. Each batch

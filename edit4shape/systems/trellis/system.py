@@ -142,14 +142,16 @@ class TrellisSystem:
         即使 optimizer 为 None（eval_only 模式），也需要调用 prepare
         将模型注册到 accelerator，否则 accelerator.load_state() 无法恢复权重。
 
-        Sparse (slat_flow_model) 始终 prepare。
-        Dense (sparse_structure_flow_model) 仅在 optimizer_dense 存在时 prepare。
+        Sparse (slat_flow_model) 始终先 prepare。
+        Dense (sparse_structure_flow_model) 在配置启用 dense optimizer 时随后
+        prepare；eval_only 下即使 optimizer_dense 为 None 也必须注册模型，确保
+        Accelerate 的 flat checkpoint 顺序稳定为 model → model_1。
         """
         if accelerator is None:
             return self
         if self.strategy is not None:
             self.optimizer_sparse = self.strategy.prepare_sparse(accelerator, self.optimizer_sparse)
-            if self.optimizer_dense is not None:
+            if cfg.train.dense_optimizer:
                 self.optimizer_dense = self.strategy.prepare_dense(
                     accelerator, self.optimizer_dense,
                 )
