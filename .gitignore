@@ -311,6 +311,14 @@ pretrained_weights
 wandb
 outputs/
 
+# Local credentials and machine-specific configuration
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.json
+
 notebooks/
 *.mp4
 *.jpg
@@ -331,6 +339,10 @@ profiler_logs/
 
 # Model checkpoints and training artifacts
 checkpoints/
+
+# Local dataset and experiment mounts
+data/
+experiments/
 
 # Reference code and external repositories
 _reference_codes
