@@ -3,7 +3,7 @@ Trellis Dual Contrastive 训练入口 — Sparse + Dense 双阶段 latent 空间
 
 训练流程（两阶段串行，降低峰值显存）：
   ── Sparse Stage → optimizer_sparse.step ──
-  Phase 0–5d: 与 contrastive_autograd.py 完全一致，产出 c_src / c_tgt
+  Phase 0–5d: 执行 shared sparse contrastive phase，产出 c_src / c_tgt
   → clip_grad_norm + optimizer_sparse.step + zero_grad（释放 sparse 梯度）
 
   ── Dense Stage → optimizer_dense.step ──
