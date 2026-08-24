@@ -4,12 +4,12 @@ Reinforced Editing Trajectory 可视化对比脚本。
 
 对比 FlowEdit 中有/无 negative source guidance 的中间步编辑轨迹：
   - With negative source guidance（标准 Reinforced Editing）:
-      v_delta = v_cfg_tgt - v_cfg_src
+      v_delta = v_cfg_tgt - v_uncond_src
   - Without negative source guidance（ablation baseline）:
       v_delta = v_cfg_tgt
 
 两种设置共享相同的 seed / noise / guidance scale / steps / prompt embedding，
-唯一差异是 v_delta 计算中是否减去 v_cfg_src。
+唯一差异是 v_delta 计算中是否减去 v_uncond_src。
 
 输出：
   - 每种设置各 step 的 decoded 中间图像
@@ -60,10 +60,8 @@ def run_flowedit_trajectory(
     # 预计算的 latent / embeddings（两次运行共享）
     x_src: torch.Tensor,
     all_latents_list: List[torch.Tensor],
-    prompt_embeds_src: torch.Tensor,
-    prompt_embeds_mask_src: torch.Tensor,
-    negative_prompt_embeds_src: torch.Tensor,
-    negative_prompt_embeds_mask_src: torch.Tensor,
+    source_uncond_embeds: torch.Tensor,
+    source_uncond_embeds_mask: torch.Tensor,
     prompt_embeds_tgt: torch.Tensor,
     prompt_embeds_mask_tgt: torch.Tensor,
     negative_prompt_embeds_tgt: torch.Tensor,
@@ -72,15 +70,13 @@ def run_flowedit_trajectory(
     timesteps: torch.Tensor,
     num_inference_steps: int,
     n_max: int,
-    true_cfg_scale_src: float,
     true_cfg_scale_tgt: float,
     guidance: Optional[torch.Tensor],
     noise_init: torch.Tensor,
     height: int,
     width: int,
     vae_image_sizes: List[Tuple[int, int]],
-    # prompt 相等性标记（控制是否跳过 uncond 推理）
-    src_neg_same: bool,
+    # prompt 相等性标记（控制是否跳过 target uncond 推理）
     tgt_neg_same: bool,
     # Ablation 开关
     use_neg_src_guidance: bool = True,
@@ -95,7 +91,7 @@ def run_flowedit_trajectory(
     Args:
         save_active_steps: 在这些 active step index 处 decode z_edit。
                            active step 从 0 开始计数（跳过的步不计）。
-        use_neg_src_guidance: True = v_delta = v_cfg_tgt - v_cfg_src;
+        use_neg_src_guidance: True = v_delta = v_cfg_tgt - v_uncond_src;
                               False = v_delta = v_cfg_tgt.
     Returns:
         (z_edit, step_images) — step_images[active_step_idx] = PIL.Image
@@ -139,40 +135,18 @@ def run_flowedit_trajectory(
         latents_src = (1 - t_curr) * x_src + t_curr * noise  # [B, seq_len, C]
         latent_model_input_src, img_shapes_src = get_latent_model_input_and_img_shapes(latents_src)
 
-        with pipe.transformer.cache_context("cond"):
-            v_cond_src = pipe.transformer(
+        with pipe.transformer.cache_context("uncond"):
+            v_uncond_src = pipe.transformer(
                 hidden_states=latent_model_input_src,
                 timestep=timestep / 1000,
                 guidance=guidance,
-                encoder_hidden_states_mask=prompt_embeds_mask_src,
-                encoder_hidden_states=prompt_embeds_src,
+                encoder_hidden_states_mask=source_uncond_embeds_mask,
+                encoder_hidden_states=source_uncond_embeds,
                 img_shapes=img_shapes_src,
                 attention_kwargs={},
                 return_dict=False,
             )[0]
-            v_cond_src = v_cond_src[:, :x_src.shape[1]]  # [B, seq_len, C]
-
-        if not src_neg_same:
-            with pipe.transformer.cache_context("uncond"):
-                v_uncond_src = pipe.transformer(
-                    hidden_states=latent_model_input_src,
-                    timestep=timestep / 1000,
-                    guidance=guidance,
-                    encoder_hidden_states_mask=negative_prompt_embeds_mask_src,
-                    encoder_hidden_states=negative_prompt_embeds_src,
-                    img_shapes=img_shapes_src,
-                    attention_kwargs={},
-                    return_dict=False,
-                )[0]
-                v_uncond_src = v_uncond_src[:, :x_src.shape[1]]  # [B, seq_len, C]
-
-            comb_pred_src = v_uncond_src + true_cfg_scale_src * (v_cond_src - v_uncond_src)  # [B, seq_len, C]
-            cond_norm_src = torch.norm(v_cond_src, dim=-1, keepdim=True)  # [B, seq_len, 1]
-            cfg_norm_src = torch.norm(comb_pred_src, dim=-1, keepdim=True)  # [B, seq_len, 1]
-            v_cfg_src = comb_pred_src * (cond_norm_src / (cfg_norm_src + 1e-8))  # [B, seq_len, C]
-        else:
-            v_uncond_src = v_cond_src
-            v_cfg_src = v_cond_src
+            v_uncond_src = v_uncond_src[:, :x_src.shape[1]]  # [B, seq_len, C]
 
         # ========== Target Branch ==========
         latents_tgt = z_edit + latents_src - x_src  # [B, seq_len, C]
@@ -215,7 +189,7 @@ def run_flowedit_trajectory(
 
         # ========== Euler Step (ablation point) ==========
         if use_neg_src_guidance:
-            v_delta = v_cfg_tgt - v_cfg_src  # [B, seq_len, C]
+            v_delta = v_cfg_tgt - v_uncond_src  # [B, seq_len, C]
         else:
             v_delta = v_cfg_tgt  # [B, seq_len, C]
 
@@ -267,10 +241,7 @@ def setup_pipeline(pipe, rendered_pil, condition_pil, args, device):
     height = height // multiple_of * multiple_of
 
     target_prompt = args.prompt
-    source_prompt = args.prompt
-    negative_prompt_src = args.negative_prompt
     negative_prompt_tgt = args.negative_prompt
-    true_cfg_scale_src = -args.cfg_scale
     true_cfg_scale_tgt = args.cfg_scale
     guidance_scale = args.guidance_scale
 
@@ -294,25 +265,9 @@ def setup_pipeline(pipe, rendered_pil, condition_pil, args, device):
 
     cond_images = [condition_images[1]]
 
-    src_neg_same = (source_prompt == negative_prompt_src)
     tgt_neg_same = (target_prompt == negative_prompt_tgt)
 
-    # Encode prompts
-    prompt_embeds_src, prompt_embeds_mask_src = pipe.encode_prompt(
-        image=cond_images, prompt=source_prompt,
-        device=device, num_images_per_prompt=num_images_per_prompt,
-        max_sequence_length=max_sequence_length,
-    )
-    if src_neg_same:
-        negative_prompt_embeds_src = prompt_embeds_src
-        negative_prompt_embeds_mask_src = prompt_embeds_mask_src
-    else:
-        negative_prompt_embeds_src, negative_prompt_embeds_mask_src = pipe.encode_prompt(
-            image=cond_images, prompt=negative_prompt_src,
-            device=device, num_images_per_prompt=num_images_per_prompt,
-            max_sequence_length=max_sequence_length,
-        )
-
+    # Encode target conditional and unconditional prompts. Source reuses unconditional.
     prompt_embeds_tgt, prompt_embeds_mask_tgt = pipe.encode_prompt(
         image=cond_images, prompt=target_prompt,
         device=device, num_images_per_prompt=num_images_per_prompt,
@@ -327,6 +282,8 @@ def setup_pipeline(pipe, rendered_pil, condition_pil, args, device):
             device=device, num_images_per_prompt=num_images_per_prompt,
             max_sequence_length=max_sequence_length,
         )
+    source_uncond_embeds = negative_prompt_embeds_tgt
+    source_uncond_embeds_mask = negative_prompt_embeds_mask_tgt
 
     # Prepare latents
     num_channels_latents = pipe.transformer.config.in_channels // 4
@@ -337,7 +294,7 @@ def setup_pipeline(pipe, rendered_pil, condition_pil, args, device):
         batch_size * num_images_per_prompt,
         num_channels_latents,
         height, width,
-        prompt_embeds_src.dtype,
+        source_uncond_embeds.dtype,
         device, generator, None,
     )
 
@@ -391,17 +348,13 @@ def setup_pipeline(pipe, rendered_pil, condition_pil, args, device):
         "height": height,
         "width": width,
         "vae_image_sizes": vae_image_sizes,
-        "true_cfg_scale_src": true_cfg_scale_src,
         "true_cfg_scale_tgt": true_cfg_scale_tgt,
-        "prompt_embeds_src": prompt_embeds_src,
-        "prompt_embeds_mask_src": prompt_embeds_mask_src,
-        "negative_prompt_embeds_src": negative_prompt_embeds_src,
-        "negative_prompt_embeds_mask_src": negative_prompt_embeds_mask_src,
+        "source_uncond_embeds": source_uncond_embeds,
+        "source_uncond_embeds_mask": source_uncond_embeds_mask,
         "prompt_embeds_tgt": prompt_embeds_tgt,
         "prompt_embeds_mask_tgt": prompt_embeds_mask_tgt,
         "negative_prompt_embeds_tgt": negative_prompt_embeds_tgt,
         "negative_prompt_embeds_mask_tgt": negative_prompt_embeds_mask_tgt,
-        "src_neg_same": src_neg_same,
         "tgt_neg_same": tgt_neg_same,
     }
 
@@ -771,10 +724,8 @@ def process_single_image(
         pipe=pipe,
         x_src=shared["x_src"],
         all_latents_list=shared["all_latents_list"],
-        prompt_embeds_src=shared["prompt_embeds_src"],
-        prompt_embeds_mask_src=shared["prompt_embeds_mask_src"],
-        negative_prompt_embeds_src=shared["negative_prompt_embeds_src"],
-        negative_prompt_embeds_mask_src=shared["negative_prompt_embeds_mask_src"],
+        source_uncond_embeds=shared["source_uncond_embeds"],
+        source_uncond_embeds_mask=shared["source_uncond_embeds_mask"],
         prompt_embeds_tgt=shared["prompt_embeds_tgt"],
         prompt_embeds_mask_tgt=shared["prompt_embeds_mask_tgt"],
         negative_prompt_embeds_tgt=shared["negative_prompt_embeds_tgt"],
@@ -782,14 +733,12 @@ def process_single_image(
         timesteps=shared["timesteps"],
         num_inference_steps=shared["num_inference_steps"],
         n_max=args.n_max,
-        true_cfg_scale_src=shared["true_cfg_scale_src"],
         true_cfg_scale_tgt=shared["true_cfg_scale_tgt"],
         guidance=shared["guidance"],
         noise_init=shared["noise_init"],
         height=shared["height"],
         width=shared["width"],
         vae_image_sizes=shared["vae_image_sizes"],
-        src_neg_same=shared["src_neg_same"],
         tgt_neg_same=shared["tgt_neg_same"],
         noise_mode=args.noise_mode,
         save_active_steps=save_set,

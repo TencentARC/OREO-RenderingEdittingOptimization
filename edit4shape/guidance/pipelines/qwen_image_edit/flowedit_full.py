@@ -118,8 +118,6 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
         self,
         image: Optional[PipelineImageInput] = None,
         target_prompt: Union[str, List[str]] = None,
-        source_prompt: Union[str, List[str]] = None,
-        negative_prompt_src: Union[str, List[str]] = None,
         negative_prompt_tgt: Union[str, List[str]] = None,
         height: Optional[int] = None,
         width: Optional[int] = None,
@@ -140,7 +138,6 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 512,
         # FlowEdit Params
-        true_cfg_scale_src: float = 1.5,
         true_cfg_scale_tgt: float = 5.5,
         n_max: int = 20,
         noise_mode: str = "aligned",  # 噪声更新模式："random" / "fixed" / "aligned"
@@ -158,10 +155,7 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
         Args:
             image: Input image(s) for editing.
             target_prompt: Target prompt for editing.
-            source_prompt: Source prompt describing the original image.
-            negative_prompt_src: Negative prompt for source branch CFG.
             negative_prompt_tgt: Negative prompt for target branch CFG.
-            true_cfg_scale_src: CFG scale for source branch.
             true_cfg_scale_tgt: CFG scale for target branch.
             n_max: FlowEdit step range control.
             use_tgt_record: 是否将 target 分支的 x0 预测记录到 tracker（默认 True）
@@ -228,49 +222,20 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
                 condition_images.append(self.image_processor.resize(img, condition_height, condition_width))
                 vae_images.append(self.image_processor.preprocess(img, vae_height, vae_width).unsqueeze(2))
 
-        has_neg_prompt_src = negative_prompt_src is not None
         has_neg_prompt_tgt = negative_prompt_tgt is not None
 
-        if true_cfg_scale_src > 1 and not has_neg_prompt_src:
-            logger.warning("true_cfg_scale_src > 1 but negative_prompt_src is not provided.")
         if true_cfg_scale_tgt > 1 and not has_neg_prompt_tgt:
             logger.warning("true_cfg_scale_tgt > 1 but negative_prompt_tgt is not provided.")
 
         # Prepare images for VLM encoding（固定使用条件图 index=1）
         cond_images = [condition_images[1]]
 
-        do_true_cfg_src = has_neg_prompt_src and true_cfg_scale_src != 1
         do_true_cfg_tgt = has_neg_prompt_tgt and true_cfg_scale_tgt > 1
 
-        assert do_true_cfg_src, "FlowEdit requires CFG for source branch (provide negative_prompt_src and true_cfg_scale_src != 1)"
         assert do_true_cfg_tgt, "FlowEdit requires CFG for target branch (provide negative_prompt_tgt and true_cfg_scale_tgt > 1)"
 
-        # 检测 prompt 是否与对应的 negative_prompt 相同（用于复用 embedding 和跳过 uncond 推理）
-        src_neg_same = (source_prompt == negative_prompt_src)
+        # 检测 target prompt 是否与 negative prompt 相同（用于复用 embedding）
         tgt_neg_same = (target_prompt == negative_prompt_tgt)
-
-        # Encode Source Prompt
-        prompt_embeds_src, prompt_embeds_mask_src = self.encode_prompt(
-            image=cond_images,
-            prompt=source_prompt,
-            device=device,
-            num_images_per_prompt=num_images_per_prompt,
-            max_sequence_length=max_sequence_length,
-        )
-
-        if do_true_cfg_src:
-            if src_neg_same:
-                # source_prompt == negative_prompt_src，复用 source embedding
-                negative_prompt_embeds_src = prompt_embeds_src
-                negative_prompt_embeds_mask_src = prompt_embeds_mask_src
-            else:
-                negative_prompt_embeds_src, negative_prompt_embeds_mask_src = self.encode_prompt(
-                    image=cond_images,
-                    prompt=negative_prompt_src,
-                    device=device,
-                    num_images_per_prompt=num_images_per_prompt,
-                    max_sequence_length=max_sequence_length,
-                )
 
         # Encode Target Prompt
         prompt_embeds_tgt, prompt_embeds_mask_tgt = self.encode_prompt(
@@ -299,6 +264,10 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
                     max_sequence_length=max_sequence_length,
                 )
 
+        # The source branch is unconditional and reuses the target negative prompt.
+        source_uncond_embeds = negative_prompt_embeds_tgt
+        source_uncond_embeds_mask = negative_prompt_embeds_mask_tgt
+
         # 4. Prepare latent variables
         num_channels_latents = self.transformer.config.in_channels // 4
 
@@ -309,7 +278,7 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
             num_channels_latents,
             height,
             width,
-            prompt_embeds_src.dtype,
+            source_uncond_embeds.dtype,
             device,
             generator,
             latents,
@@ -423,44 +392,19 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
                 # Source Model Input
                 latent_model_input_src, img_shapes_src = get_latent_model_input_and_img_shapes(latents_src)
 
-                # Calc v_cond_src
-                with self.transformer.cache_context("cond"):
-                    v_cond_src = self.transformer(
+                # Source uses exactly one unconditional prediction.
+                with self.transformer.cache_context("uncond"):
+                    v_uncond_src = self.transformer(
                         hidden_states=latent_model_input_src,
                         timestep=timestep / 1000,
                         guidance=guidance,
-                        encoder_hidden_states_mask=prompt_embeds_mask_src,
-                        encoder_hidden_states=prompt_embeds_src,
+                        encoder_hidden_states_mask=source_uncond_embeds_mask,
+                        encoder_hidden_states=source_uncond_embeds,
                         img_shapes=img_shapes_src,
                         attention_kwargs=self.attention_kwargs,
                         return_dict=False,
                     )[0]
-                    v_cond_src = v_cond_src[:, :x_src.shape[1]]  # [B, seq_len, C]
-
-                if do_true_cfg_src and not src_neg_same:
-                    # 仅当 source_prompt != negative_prompt_src 时才需要 uncond 推理
-                    with self.transformer.cache_context("uncond"):
-                        v_uncond_src = self.transformer(
-                            hidden_states=latent_model_input_src,
-                            timestep=timestep / 1000,
-                            guidance=guidance,
-                            encoder_hidden_states_mask=negative_prompt_embeds_mask_src,
-                            encoder_hidden_states=negative_prompt_embeds_src,
-                            img_shapes=img_shapes_src,
-                            attention_kwargs=self.attention_kwargs,
-                            return_dict=False,
-                        )[0]
-                        v_uncond_src = v_uncond_src[:, :x_src.shape[1]]  # [B, seq_len, C]
-
-                    # CFG combine with L2 norm rescale
-                    comb_pred_src = v_uncond_src + true_cfg_scale_src * (v_cond_src - v_uncond_src)  # [B, seq_len, C]
-                    cond_norm_src = torch.norm(v_cond_src, dim=-1, keepdim=True)  # [B, seq_len, 1]
-                    cfg_norm_src = torch.norm(comb_pred_src, dim=-1, keepdim=True)  # [B, seq_len, 1]
-                    v_cfg_src = comb_pred_src * (cond_norm_src / cfg_norm_src)  # [B, seq_len, C]
-                else:
-                    # 无 CFG 时，三者相同
-                    v_uncond_src = v_cond_src
-                    v_cfg_src = v_cond_src
+                    v_uncond_src = v_uncond_src[:, :x_src.shape[1]]  # [B, seq_len, C]
 
                 # 2. Target Branch
                 latents_tgt = z_edit + latents_src - x_src  # [B, seq_len, C]
@@ -505,10 +449,11 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
                 else:
                     # 无 CFG 时，三者相同
                     v_uncond_tgt = v_cond_tgt
+                    comb_pred_tgt = v_cond_tgt
                     v_cfg_tgt = v_cond_tgt
 
                 # 3. Update z_edit (Euler step)
-                v_delta = v_cfg_tgt - v_cfg_src  # [B, seq_len, C]
+                v_delta = v_cfg_tgt - v_uncond_src  # [B, seq_len, C]
                 z_edit = z_edit + dt * v_delta   # [B, seq_len, C]
                 
                 # 更新噪声：aligned 模式 ε -= (v_cond - v_uncond) * (1 - t)
@@ -523,22 +468,19 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
                     "cfg_rescale": latents_tgt - t_curr * v_cfg_tgt,    # [B, seq_len, C]
                 }
                 _x0_map_src = {
-                    "cond": latents_src - t_curr * v_cond_src,          # [B, seq_len, C]
                     "uncond": latents_src - t_curr * v_uncond_src,      # [B, seq_len, C]
-                    "cfg": latents_src - t_curr * comb_pred_src,        # [B, seq_len, C]
-                    "cfg_rescale": latents_src - t_curr * v_cfg_src,    # [B, seq_len, C]
                 }
 
                 # 记录 tgt 分支的 x0 正负对 → tracker
                 if use_tgt_record:
                     x0_pos_tgt = _x0_map_tgt[csd_pos_mode]  # [B, seq_len, C]
-                    x0_neg_tgt = _x0_map_src[csd_neg_mode] if remove_tgt_neg else _x0_map_tgt[csd_neg_mode]  # [B, seq_len, C]
+                    x0_neg_tgt = _x0_map_src["uncond"] if remove_tgt_neg else _x0_map_tgt[csd_neg_mode]  # [B, seq_len, C]
                     tracker.record(z_edit, float(t_curr), x0_pos_tgt, x0_neg_tgt)
                 
                 # 记录 src 分支的 x0 正负对 → tracker_src
                 if use_src_record:
-                    x0_pos_src = _x0_map_src[csd_pos_mode]  # [B, seq_len, C]
-                    x0_neg_src = _x0_map_src[csd_neg_mode]  # [B, seq_len, C]
+                    x0_pos_src = _x0_map_src["uncond"]  # [B, seq_len, C]
+                    x0_neg_src = _x0_map_src["uncond"]  # [B, seq_len, C]
                     tracker_src.record(z_edit, float(t_curr), x0_pos_src, x0_neg_src)
 
                 if callback_on_step_end is not None:

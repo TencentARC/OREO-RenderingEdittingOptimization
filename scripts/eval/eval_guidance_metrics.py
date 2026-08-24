@@ -296,9 +296,6 @@ def main(argv) -> None:
     cfg.eval_only = False
     cfg.data.eval.n_view = 5
 
-    # ---- 派生参数同步（支持命令行覆盖 target_prompt / true_cfg_scale_tgt）----
-    cfg.train.guidance.source_prompt = cfg.train.guidance.target_prompt
-
     # ---- 环境 ----
     setup_env_and_seed(cfg)
     accelerator = Accelerator(mixed_precision="no")

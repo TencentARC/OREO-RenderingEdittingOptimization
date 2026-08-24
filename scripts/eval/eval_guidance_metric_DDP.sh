@@ -15,10 +15,9 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 STEPS=${STEPS:-12}
 N_MAX=${N_MAX:-9}
 CFG_SCALE=${CFG_SCALE:-12}
-CFG_SCALE_SRC=${CFG_SCALE_SRC:-$((-1 * CFG_SCALE))}
 PROMPT="Rotate the camera. White background."
 
-RUN_NAME="eval_metrics_full-rndm_steps-${N_MAX}-${STEPS}_cfg-${CFG_SCALE}_src-${CFG_SCALE_SRC}_prompt_v15"
+RUN_NAME="eval_metrics_full-rndm_steps-${N_MAX}-${STEPS}_cfg-${CFG_SCALE}_src-uncond_prompt_v15"
 
 # 如需加载特定 checkpoint，取消注释并修改路径：
 #   --config.checkpoint=path/to/checkpoint
@@ -43,5 +42,4 @@ python -m accelerate.commands.launch \
     --config.guidance.flowedit.steps=$STEPS \
     --config.guidance.flowedit.n_max=$N_MAX \
     --config.train.guidance.true_cfg_scale_tgt=$CFG_SCALE \
-    --config.train.guidance.true_cfg_scale_src=$CFG_SCALE_SRC \
     --config.train.guidance.target_prompt="$PROMPT"

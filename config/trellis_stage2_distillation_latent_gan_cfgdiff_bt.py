@@ -20,7 +20,6 @@ def get_config():
 
     # === Prompt ===
     cfg.train.guidance.target_prompt = "Rotate the camera. White background."
-    cfg.train.guidance.source_prompt = cfg.train.guidance.target_prompt
 
     # === Loss: GAN-only (no MSE pixel loss) ===
     cfg.train.guidance.loss.mse = 0.0
