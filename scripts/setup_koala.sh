@@ -21,6 +21,8 @@
 #       alphaimages_v3.tar              (474 MB)
 #       cuda_site_packages.tar          (150 MB)
 #     flow_grpo_v2/                     ← 本项目独有
+#       envs/
+#         uv-py312-torch260cu124-diff0380-tf4576-v1.tar  (immutable environment cache)
 #       TRELLIS-image-large.tar         (3 GB)
 #       trellis_reference.tar           (300 MB)
 # ============================================================================
@@ -46,7 +48,8 @@ PROJECT_DIR="/data/work/run_codes"
 S3_SHARED="${S3_BUCKET}/data/flow_grpo"
 S3_V2="${S3_BUCKET}/data/flow_grpo_v2"
 CUDA_SP_TAR="${S3_SHARED}/cuda_site_packages.tar"
-VENV_TAR="${S3_V2}/uv-venv.tar"
+ENV_CACHE_ID="uv-py312-torch260cu124-diff0380-tf4576-v1"
+VENV_TAR="${S3_V2}/envs/${ENV_CACHE_ID}.tar"
 REFERENCE_TAR="${S3_V2}/trellis_reference.tar"
 TRELLIS_WEIGHTS_TAR="${S3_V2}/TRELLIS-image-large.tar"
 DATASET_TAR="${S3_SHARED}/alphaimages_v3.tar"
@@ -77,13 +80,53 @@ export WANDB_API_KEY="${WANDB_API_KEY:-}"
 # ============================================================================
 echo "=== [1/6] Python dependencies ==="
 
+qwen_env_matches() {
+    /tmp/uv-venv/bin/python -c '
+import sys
+from importlib.metadata import version
+
+expected = {
+    "torch": "2.6.0+cu124",
+    "torchvision": "0.21.0+cu124",
+    "diffusers": "0.38.0",
+    "transformers": "4.57.6",
+    "tokenizers": "0.22.0",
+    "accelerate": "1.4.0",
+    "safetensors": "0.8.0",
+    "flash-attn": "2.7.3",
+    "spconv-cu124": "2.3.8",
+}
+matches = sys.version_info[:2] == (3, 12)
+matches = matches and all(version(name) == wanted for name, wanted in expected.items())
+raise SystemExit(0 if matches else 1)
+' 2>/dev/null
+}
+
+fail_incompatible_local_venv() {
+    echo "  ERROR: /tmp/uv-venv exists but does not match ${ENV_CACHE_ID}."
+    echo "  Refusing to reuse or modify an unknown environment in place."
+    echo "  Start with a clean /tmp/uv-venv, then restore ${VENV_TAR}."
+    return 1 2>/dev/null || exit 1
+}
+
 # 快速路径：从 S3 恢复完整 venv（含所有 pip 包 + CUDA 扩展 + kaolin + flash-attn）
-if /tmp/uv-venv/bin/python -c "import torch; import flash_attn; import diff_gaussian_rasterization" 2>/dev/null; then
-    echo "  venv already complete, skipping"
+if qwen_env_matches && /tmp/uv-venv/bin/python -c "import diff_gaussian_rasterization" 2>/dev/null; then
+    echo "  Exact ${ENV_CACHE_ID} environment already complete, skipping"
+elif [ -e /tmp/uv-venv ]; then
+    fail_incompatible_local_venv
 elif s5cmd ls "${VENV_TAR}" &>/dev/null; then
-    echo "  Restoring pre-built venv from S3 (~8.9 GB)..."
+    echo "  Restoring immutable ${ENV_CACHE_ID} environment from S3..."
     s5cmd cat "${VENV_TAR}" | tar xf - -C /tmp/
+    if ! qwen_env_matches || ! /tmp/uv-venv/bin/python -c "import diff_gaussian_rasterization" 2>/dev/null; then
+        echo "  ERROR: Restored cache does not match its declared environment ID or lacks CUDA extensions."
+        return 1 2>/dev/null || exit 1
+    fi
     echo "  venv restored"
+elif [ "$FAST_MODE" = true ]; then
+    echo "  ERROR: Immutable environment cache not found: ${VENV_TAR}"
+    echo "  Refusing to fall back to the legacy flow_grpo_v2/uv-venv.tar."
+    echo "  Build the new cache explicitly with: . scripts/setup_koala.sh --download"
+    return 1 2>/dev/null || exit 1
 else
     echo "  No venv tar found, installing from scratch..."
 
@@ -91,7 +134,7 @@ if [ ! -d /tmp/uv-venv ]; then
     uv venv --python 3.12 /tmp/uv-venv
 fi
 
-if ! /tmp/uv-venv/bin/python -c "import torch; assert torch.__version__.startswith('2.6')" 2>/dev/null; then
+if ! /tmp/uv-venv/bin/python -c "import torch, sys; sys.exit(0 if torch.__version__ == '2.6.0+cu124' else 1)" 2>/dev/null; then
     echo "  Installing torch 2.6.0+cu124..."
     uv pip install --python /tmp/uv-venv/bin/python \
         torch==2.6.0+cu124 torchvision==0.21.0+cu124 \
@@ -102,7 +145,8 @@ fi
 
 echo "  Installing Python packages..."
 uv pip install --python /tmp/uv-venv/bin/python \
-    "transformers>=4.57.0" "accelerate==1.4.0" "peft>=0.10.0" \
+    "transformers==4.57.6" "tokenizers==0.22.0" \
+    "accelerate==1.4.0" "safetensors==0.8.0" "peft>=0.10.0" \
     "diffusers==0.38.0" \
     ml-collections wandb kiui rembg onnxruntime open3d \
     imageio imageio-ffmpeg tqdm easydict opencv-python-headless ninja \
@@ -135,6 +179,11 @@ if ! /tmp/uv-venv/bin/python -c "import flash_attn" 2>/dev/null; then
         --no-build-isolation flash-attn==2.7.3
 else
     echo "  flash-attn already installed"
+fi
+
+if ! qwen_env_matches; then
+    echo "  ERROR: Installed environment does not match ${ENV_CACHE_ID}."
+    return 1 2>/dev/null || exit 1
 fi
 echo "  Done"
 
@@ -181,6 +230,16 @@ else
     echo "  ERROR: No CUDA ext tar found and --download not specified."
     echo "  First-time setup: run with --download"
     return 1 2>/dev/null || exit 1
+fi
+
+if [ "$DOWNLOAD_MODE" = true ]; then
+    if s5cmd ls "${VENV_TAR}" &>/dev/null; then
+        echo "  ERROR: Refusing to overwrite immutable environment cache: ${VENV_TAR}"
+        return 1 2>/dev/null || exit 1
+    fi
+    echo "  Saving immutable environment cache to ${VENV_TAR}..."
+    tar cf - -C /tmp uv-venv/ | aws s3 cp - "${VENV_TAR}"
+    echo "  Environment cached"
 fi
 
 fi  # end of "No venv tar found, installing from scratch"

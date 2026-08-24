@@ -1,12 +1,18 @@
 # OREO Dual-Stage TRELLIS 所需的依赖包
-# 基于 grpo3d 环境实际测试结果 (当前稳定组合: PyTorch 2.5.1+cu124, CUDA 12.4)
+# 已验证的 Qwen/TRELLIS 组合: Python 3.12, PyTorch 2.6.0+cu124, CUDA 12.4
 
 # === 核心深度学习框架 ===
-# torch==2.5.1+cu124        # PyTorch 核心框架 (与 flash-attn 2.8.3 通过本地编译验证)
-# torchvision==0.20.1+cu124 # 计算机视觉工具 (与 torch 2.5.1 对齐)
-transformers>=4.57.0      # Hugging Face 模型库（支持 DINOv3 处理器，含 FA2/SDPA 控制）
-diffusers==0.33.1         # 扩散模型框架
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.6.0+cu124        # PyTorch 核心框架
+torchvision==0.21.0+cu124 # 与 torch 2.6.0 对齐
+transformers==4.57.6     # 固定 4.x，禁止静默升级到不兼容的 Transformers 5
+diffusers==0.38.0         # Qwen-Image-Edit-2511 已验证版本
 accelerate==1.4.0         # 分布式训练加速
+safetensors==0.8.0        # 安全张量序列化
+tokenizers==0.22.0        # 与 transformers 4.57.6 对齐
+# build-with-no-isolation: flash-attn==2.7.3
+#   不能由 requirements.txt 直接安装；请按文末步骤在 torch 之后单独编译。
+spconv-cu124==2.3.8       # TRELLIS sparse convolution（import 名为 spconv）
 peft==0.10.0              # 参数高效微调
 huggingface-hub>=0.25.0   # 模型下载/缓存
 omegaconf==2.3.0          # 配置系统（Direct3D‑S2 参考实现依赖）
@@ -26,11 +32,9 @@ igraph==0.11.9            # 图处理
 kiui==0.2.17              # 3D 视觉工具包（与参考代码依赖兼容）
 git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8  # 3D 工具库（固定提交）
 
-# # === 注意力机制库 (二选一，请勿同时强制启用) ===
-# # 默认推荐使用 flash-attn (已在 torch 2.5.1+cu124 下完成编译测试)
-# flash-attn==2.8.3         # ✅ 已测试: 前向通过 (fp16)；若需重新编译请设置 TORCH_CUDA_ARCH_LIST
-# # 如果坚持使用 xformers (需要 torch==2.6.0, 与当前固定版本冲突) 请建新环境，不建议在本环境混装
-# # xformers==0.0.29.post3  # ⚠ 与 torch 2.5.1 存在依赖冲突 (其 meta 要求 2.6.0)
+# === 注意力机制 ===
+# 固定的 flash-attn 2.7.3 已在 torch 2.6.0+cu124 环境中编译。
+# 请勿在这个环境中混装 xformers；如需它，请建立独立的锁定环境。
 
 # === Direct3D‑S2 可选依赖说明（不自动安装） ===
 # - 参考包 direct3d_s2 放在 `_reference_codes/Direct3D-S2`，需按 INSTALL.md 手动安装：
@@ -54,7 +58,7 @@ lpips==0.1.4              # 感知损失计算
 # nvdiffrast==0.3.3         # NVIDIA 可微分渲染器（与当前环境一致）
 
 # === 性能优化和计算 ===
-triton==3.1.0             # 与 torch 2.5.1 wheel 匹配 (安装 torch 时自动替换自 3.2.0)
+triton==3.2.0             # 与 torch 2.6.0 wheel 匹配
 ninja==1.11.1.4           # 编译加速
 numba==0.61.2             # Python 代码加速
 bitsandbytes==0.45.3      # 8-bit 量化优化
@@ -93,8 +97,6 @@ pyarrow==20.0.0           # 数据序列化
 fsspec==2024.12.0         # 文件系统抽象
 multiprocess==0.70.16     # 多进程支持
 datasets==3.3.2           # 数据集工具
-tokenizers==0.22.0        # 分词器（与 transformers 4.57.x 兼容：>=0.22.0,<0.24.0）
-safetensors>=0.4.4        # 安全张量序列化
 
 # === 其他工具 ===
 onnxruntime==1.22.0       # ONNX 推理
@@ -105,26 +107,26 @@ deepspeed==0.16.4         # 大模型训练优化
 # ============================================================================
 #
 # 1. 环境要求:
-#    - Python 3.10
-#    - CUDA 12.4 (与 PyTorch 2.5.1+cu124 及 flash-attn 2.8.3 验证)
-#    - 推荐使用 conda 环境管理
+#    - Python 3.12
+#    - CUDA 12.4 (与 PyTorch 2.6.0+cu124 及 flash-attn 2.7.3 验证)
+#    - 推荐使用 uv 环境管理
 #
 # 2. 安装顺序 (重要):
-#    conda create -n grpo3d python=3.10
+#    conda create -n grpo3d python=3.12
 #    conda activate grpo3d
 #    
 #    # 先安装 PyTorch (官方 cu124 源)
-#    pip install torch==2.5.1+cu124 torchvision==0.20.1+cu124 torchaudio==2.5.1+cu124 \
+#    pip install torch==2.6.0+cu124 torchvision==0.21.0+cu124 \
 #      --index-url https://download.pytorch.org/whl/cu124
 #    
 #    # 再安装3D相关依赖 (顺序重要)
-#    pip install kaolin==0.18.0 -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu121.html
 #    pip install spconv-cu124==2.3.8  # 将自动安装匹配的 cumm-cu124
+#    pip install kaolin==0.18.0 -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.6.0_cu124.html
 #    
 #    # 安装 flash-attn (如需自定义架构, 修改 TORCH_CUDA_ARCH_LIST)
 #    export TORCH_CUDA_ARCH_LIST="80;86;89;90"
-#    pip install --no-build-isolation flash-attn==2.8.3
-#    # 再安装其余包
+#    pip install --no-build-isolation flash-attn==2.7.3
+#    # flash-attn 已满足上方的特殊构建声明，再安装其余包
 #    pip install -r requirements.txt
 #
 # 3. 环境变量配置 (关键):
@@ -139,9 +141,9 @@ deepspeed==0.16.4         # 大模型训练优化
 #    ./scripts/run_trellis.sh python your_script.py
 #
 # 5. 已知问题:
-#    - 若升级 torch 到 2.6.x 可能出现 flash-attn C++ 符号缺失 (c10::Error)；保持当前组合即可
-#    - 使用 xformers 需独立新环境 (其版本依赖 torch 2.6.0)
-#    - kaolin 的 wheel 索引需与目标 torch/CUDA 对齐，当前引用为 2.4.0_cu121 兼容性足够
+#    - 不要将 transformers 升级到 5.x；diffusers 0.38.0 的 Qwen prompt encoding 与其不兼容
+#    - flash-attn 必须针对当前 torch 2.6.0+cu124 环境编译
+#    - kaolin 的 wheel 索引必须与目标 torch 2.6.0 / CUDA 12.4 对齐
 #
 # 6. 验证安装:
 #    python -c "import torch, flash_attn, spconv, kaolin; print('✅ 核心依赖安装成功')"
