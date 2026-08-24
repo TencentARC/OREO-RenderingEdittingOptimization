@@ -3,9 +3,10 @@
 # KOALA 环境恢复脚本 — flow_grpo_custom_v2 (Trellis Stage 2 Distillation)
 # ============================================================================
 # 用法：
-#   . scripts/setup_koala.sh [--fast] [--download]
+#   . scripts/setup_koala.sh [--fast] [--qwen-only] [--download]
 #
-# --fast      跳过首次下载/编译，假设 S3 已有所有 tar 缓存（日常恢复模式）
+# --fast      严格离线训练恢复；缺任何必需缓存即失败，跳过可选 metric/GAN 权重
+# --qwen-only 仅与 --fast 同用；只恢复环境和 Qwen，不恢复 TRELLIS/数据/metric
 # --download  首次使用：从 HuggingFace 下载权重/数据，编译 CUDA 扩展，打包到 S3
 #
 # 注意：通过 source 执行（. scripts/setup_koala.sh），以保留 export 的环境变量。
@@ -17,12 +18,13 @@
 # S3 布局（首次 --download 完成后自动创建）：
 #   s3://arcwm-code-us-west-2/$USER/data/
 #     flow_grpo/                        ← 共享（与 flow_grpo_custom 复用）
-#       qwen-image-edit-2511.tar        (33 GB)
 #       alphaimages_v3.tar              (474 MB)
 #       cuda_site_packages.tar          (150 MB)
 #     flow_grpo_v2/                     ← 本项目独有
 #       envs/
 #         uv-py312-torch260cu124-diff0380-tf4576-v1.tar  (immutable environment cache)
+#       models/
+#         qwen-image-edit-2511-6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9-hf-v1.tar
 #       TRELLIS-image-large.tar         (3 GB)
 #       trellis_reference.tar           (300 MB)
 # ============================================================================
@@ -31,13 +33,24 @@ set -euo pipefail
 # --- 参数解析 ---
 FAST_MODE=false
 DOWNLOAD_MODE=false
+QWEN_ONLY=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --fast)     FAST_MODE=true; shift ;;
+        --qwen-only) QWEN_ONLY=true; shift ;;
         --download) DOWNLOAD_MODE=true; shift ;;
         *)          echo "Unknown option: $1"; return 1 2>/dev/null || exit 1 ;;
     esac
 done
+
+if [ "$FAST_MODE" = true ] && [ "$DOWNLOAD_MODE" = true ]; then
+    echo "ERROR: --fast and --download are mutually exclusive."
+    return 1 2>/dev/null || exit 1
+fi
+if [ "$QWEN_ONLY" = true ] && [ "$FAST_MODE" != true ]; then
+    echo "ERROR: --qwen-only requires --fast."
+    return 1 2>/dev/null || exit 1
+fi
 
 # --- 路径配置 ---
 USER="${KOALA_USER:-ericzyma}"
@@ -53,7 +66,9 @@ VENV_TAR="${S3_V2}/envs/${ENV_CACHE_ID}.tar"
 REFERENCE_TAR="${S3_V2}/trellis_reference.tar"
 TRELLIS_WEIGHTS_TAR="${S3_V2}/TRELLIS-image-large.tar"
 DATASET_TAR="${S3_SHARED}/alphaimages_v3.tar"
-QWEN_TAR="${S3_SHARED}/qwen-image-edit-2511.tar"
+QWEN_COMMIT="6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9"
+QWEN_ARCHIVE_ID="qwen-image-edit-2511-${QWEN_COMMIT}-hf-v1"
+QWEN_TAR="${S3_V2}/models/${QWEN_ARCHIVE_ID}.tar"
 
 # 本地目标路径
 WEIGHTS_LOCAL="/local-ssd/pretrained_weights"
@@ -74,6 +89,18 @@ export UV_PROJECT_ENVIRONMENT=/tmp/uv-venv
 export UV_FROZEN=1
 export ATTN_BACKEND=flash_attn
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
+
+if [ "$FAST_MODE" = true ]; then
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+    export DIFFUSERS_OFFLINE=1
+    QWEN_PREFLIGHT_CACHE="${HF_HOME}/hub/models--Qwen--Qwen-Image-Edit-2511"
+    if [ ! -e "${QWEN_PREFLIGHT_CACHE}" ] && ! s5cmd ls "${QWEN_TAR}" &>/dev/null; then
+        echo "ERROR: Required immutable Qwen archive not found: ${QWEN_TAR}"
+        echo "Refusing to use the legacy archive or contact Hugging Face."
+        return 1 2>/dev/null || exit 1
+    fi
+fi
 
 # ============================================================================
 # [1/6] Python 依赖 + CUDA 扩展（venv 整包恢复 or 逐步安装）
@@ -247,6 +274,10 @@ fi  # end of "No venv tar found, installing from scratch"
 # ============================================================================
 # [3/6] _reference_codes/TRELLIS（git clone or tar 恢复）
 # ============================================================================
+if [ "$QWEN_ONLY" = true ]; then
+echo "=== [3-5/6] Training assets ==="
+echo "  Skipped by explicit --qwen-only mode."
+else
 echo "=== [3/6] TRELLIS reference code ==="
 if [ -d "${REFERENCE_LOCAL}/trellis" ]; then
     echo "  Already present, skipping"
@@ -319,36 +350,87 @@ else
 fi
 mkdir -p "${PROJECT_DIR}/dataset"
 ln -sfn "${DATASET_LOCAL}" "${PROJECT_DIR}/dataset/alphaimages_v3"
+fi  # training assets
 
 # ============================================================================
 # [6/6] Qwen Guidance 模型（HF cache）
 # ============================================================================
 echo "=== [6/6] Qwen-Image-Edit-2511 (HF cache) ==="
-if [ -d "${HF_HOME}/hub/models--Qwen--Qwen-Image-Edit-2511" ]; then
-    echo "  Already in HF cache"
-elif s5cmd ls "${QWEN_TAR}" &>/dev/null; then
-    echo "  Restoring from tar..."
-    s5cmd cat "${QWEN_TAR}" | tar xf - -C /local-ssd/
-    echo "  Restored"
-elif [ "$DOWNLOAD_MODE" = true ]; then
-    echo "  Downloading (~33 GB, may take a while)..."
+QWEN_CACHE_ROOT="${HF_HOME}/hub/models--Qwen--Qwen-Image-Edit-2511"
+QWEN_SNAPSHOT="${QWEN_CACHE_ROOT}/snapshots/${QWEN_COMMIT}"
+QWEN_ARCHIVE_LOCAL="/local-ssd/${QWEN_ARCHIVE_ID}.tar"
+QWEN_ARCHIVE_HELPER="${PROJECT_DIR}/scripts/qwen_snapshot_archive.py"
+
+verify_qwen_cache() {
+    /tmp/uv-venv/bin/python "${QWEN_ARCHIVE_HELPER}" verify-cache "${QWEN_CACHE_ROOT}"
+}
+
+download_exact_qwen_snapshot() {
     mkdir -p "${HF_HOME}"
     /tmp/uv-venv/bin/python -c "
 from huggingface_hub import snapshot_download
-snapshot_download('Qwen/Qwen-Image-Edit-2511', cache_dir='${HF_HOME}', resume_download=True)
-print('Qwen-Image-Edit-2511 done')
+path = snapshot_download(
+    'Qwen/Qwen-Image-Edit-2511',
+    revision='${QWEN_COMMIT}',
+    cache_dir='${HF_HOME}/hub',
+)
+if not path.endswith('/${QWEN_COMMIT}'):
+    raise RuntimeError(f'unexpected snapshot path: {path}')
+print(path)
 "
-    echo "  Saving tar to S3..."
-    tar cf - -C /local-ssd hf_cache/ | aws s3 cp - "${QWEN_TAR}"
-    echo "  Downloaded and cached"
+    verify_qwen_cache
+}
+
+if [ -e "${QWEN_CACHE_ROOT}" ]; then
+    if ! verify_qwen_cache; then
+        echo "  ERROR: Existing Qwen cache is incomplete or not commit ${QWEN_COMMIT}."
+        echo "  Refusing to repair it from the network or overlay another archive."
+        return 1 2>/dev/null || exit 1
+    fi
+    echo "  Exact snapshot already in HF cache"
+elif s5cmd ls "${QWEN_TAR}" &>/dev/null; then
+    echo "  Restoring immutable exact-snapshot archive..."
+    mkdir -p "${HF_HOME}/hub"
+    s5cmd cp "${QWEN_TAR}" "${QWEN_ARCHIVE_LOCAL}"
+    if ! /tmp/uv-venv/bin/python "${QWEN_ARCHIVE_HELPER}" \
+        extract "${QWEN_ARCHIVE_LOCAL}" "${HF_HOME}/hub"; then
+        echo "  ERROR: Qwen archive failed safety or snapshot verification."
+        return 1 2>/dev/null || exit 1
+    fi
+    rm -f "${QWEN_ARCHIVE_LOCAL}"
+    echo "  Restored exact snapshot ${QWEN_COMMIT}"
+elif [ "$DOWNLOAD_MODE" = true ]; then
+    echo "  Downloading (~33 GB, may take a while)..."
+    download_exact_qwen_snapshot
+    /tmp/uv-venv/bin/python "${QWEN_ARCHIVE_HELPER}" \
+        build "${QWEN_CACHE_ROOT}" "${QWEN_ARCHIVE_LOCAL}"
+    /tmp/uv-venv/bin/python "${QWEN_ARCHIVE_HELPER}" \
+        verify-archive "${QWEN_ARCHIVE_LOCAL}"
+    if s5cmd ls "${QWEN_TAR}" &>/dev/null; then
+        echo "  ERROR: Refusing to overwrite immutable Qwen archive: ${QWEN_TAR}"
+        return 1 2>/dev/null || exit 1
+    fi
+    echo "  Uploading new immutable archive to ${QWEN_TAR}..."
+    aws s3 cp "${QWEN_ARCHIVE_LOCAL}" "${QWEN_TAR}"
+    rm -f "${QWEN_ARCHIVE_LOCAL}"
+    echo "  Downloaded, verified, and cached"
+elif [ "$FAST_MODE" = true ]; then
+    echo "  ERROR: Required immutable Qwen archive not found: ${QWEN_TAR}"
+    echo "  Refusing to use legacy qwen-image-edit-2511.tar or contact Hugging Face."
+    return 1 2>/dev/null || exit 1
 else
-    echo "  No tar found, will download on first training run"
-    mkdir -p "${HF_HOME}"
+    echo "  Immutable archive absent; downloading the pinned snapshot without uploading."
+    download_exact_qwen_snapshot
 fi
+export QWEN_IMAGE_EDIT_MODEL_PATH="${QWEN_SNAPSHOT}"
 
 # ============================================================================
 # [6.5/6] DINOv2 torch.hub cache（避免多进程下载竞争）
 # ============================================================================
+if [ "$QWEN_ONLY" = true ]; then
+echo "=== [6.5/6] DINOv2 (torch.hub cache) ==="
+echo "  Skipped by explicit --qwen-only mode."
+else
 echo "=== [6.5/6] DINOv2 (torch.hub cache) ==="
 DINOV2_TAR="${S3_V2}/torch_home_dinov2.tar"
 DINOV2_HUB_DIR="${TORCH_HOME}/hub/facebookresearch_dinov2_main"
@@ -371,14 +453,23 @@ print('DINOv2 hub cache warmed')
     echo "  Saving tar to S3..."
     tar cf - -C /local-ssd torch_home/ | aws s3 cp - "${DINOV2_TAR}"
     echo "  Downloaded and cached"
+elif [ "$FAST_MODE" = true ]; then
+    echo "  ERROR: Required DINOv2 cache not found: ${DINOV2_TAR}"
+    echo "  Strict --fast training setup cannot contact the network."
+    return 1 2>/dev/null || exit 1
 else
     echo "  WARNING: No DINOv2 tar found. Multi-GPU training may fail due to download race."
     echo "  Run with --download to pre-cache, or ensure single-process downloads first."
 fi
+fi  # DINOv2 training asset
 
 # ============================================================================
 # [6.6/6] DINOv3-S (Discriminator for GAN loss, ~82 MB)
 # ============================================================================
+if [ "$FAST_MODE" = true ]; then
+echo "=== [6.6-6.9/6] Optional GAN/metric weights ==="
+echo "  Skipped in --fast mode to preserve local SSD for required training assets."
+else
 echo "=== [6.6/6] DINOv3-S (Discriminator) ==="
 DINOV3S_TAR="${S3_V2}/dinov3-vits16.tar"
 DINOV3S_DIR="${WEIGHTS_LOCAL}/dinov3-vits16-pretrain-lvd1689m"
@@ -450,6 +541,7 @@ elif s5cmd ls "${DINOV3L_TAR}" &>/dev/null; then
 else
     echo "  WARNING: No DINOv3-L tar found at ${DINOV3L_TAR}. DINOMetric eval will fail."
 fi
+fi  # optional GAN/metric weights
 
 # ============================================================================
 # 后台 S3 同步（训练产出持久化）
