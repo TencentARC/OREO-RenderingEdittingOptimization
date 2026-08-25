@@ -5,7 +5,7 @@ Dense FlowEdit 评估脚本。
   Teacher (pretrained): Dense ODE → decode_to_coords → Sparse ODE
   Student (finetuned) : Dense ODE → Dense FlowEdit → decode_to_coords → Sparse ODE
 
-与 eval_trellis.py 的差异：
+与通用 teacher/student 评估脚本的差异：
   - student 路径在 Stage 1 额外执行 Dense FlowEdit
   - FlowEdit 参数通过 --config.rollout.flowedit.* 覆盖（或使用默认值）
   - 不依赖新 config 文件，直接向现有 config 注入 flowedit 子字段
@@ -105,7 +105,7 @@ def _ensure_flowedit_cfg(cfg: ml_collections.ConfigDict) -> None:
 
 
 # =====================================================================
-# 工具函数（与 eval_trellis.py 完全一致）
+# 工具函数（与通用 teacher/student 评估保持一致）
 # =====================================================================
 
 def build_eval_dataloader(cfg, accelerator: Accelerator):
@@ -223,7 +223,7 @@ def _load_existing_eval_rows(
 
 
 # =====================================================================
-# EvalMetricLogger（与 eval_trellis.py 完全一致）
+# EvalMetricLogger（与通用 teacher/student 评估保持一致）
 # =====================================================================
 
 class EvalMetricLogger:

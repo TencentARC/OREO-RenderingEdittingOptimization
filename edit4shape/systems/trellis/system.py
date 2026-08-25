@@ -86,7 +86,7 @@ class TrellisSystem:
 
     与 Trellis2System 平行的独立设计：
     - pipeline:    共享生成管道
-    - renderers:   渲染器字典 {"mesh": ..., "gs": ...}，支持 hybrid 双路渲染
+    - renderers:   渲染器字典，按保留配置选择 mesh 或 gs
     - guidance:    指导模块
     - optimizer_sparse:   Sparse 优化器（slat_flow_model）
     - optimizer_dense: Dense 优化器（sparse_structure_flow_model），仅 Dual-Stage 使用
@@ -168,42 +168,6 @@ from edit4shape.systems.trellis.forward import (  # noqa: F401
     trellis_forward,
     evaluate,
 )
-
-
-# =====================================================================
-# Sparse Mesh Extractor 注入
-# =====================================================================
-
-def inject_sparse_mesh_extractor(pipeline, device: str = "cuda") -> None:
-    """
-    将 SLatMeshDecoder 的 mesh_extractor 替换为基于 TripoSF 稀疏 FlexiCubes 的版本。
-
-    TripoSF 的稀疏实现避免了构建 (res+1)^3 的稠密网格，在高分辨率（如 256^3）下
-    显著降低显存占用，同时保持与 TRELLIS decoder 输出的兼容性。
-
-    Args:
-        pipeline: TrellisRefAdapter 实例，内部持有 pipe.models['slat_decoder_mesh']
-        device: 设备字符串，如 "cuda:0"
-    """
-    from edit4shape.generators.trellis.sparse_mesh_extractor import (
-        SparseFeatures2Mesh as SparseSparseFeatures2Mesh,
-    )
-
-    decoder = pipeline.pipe.models.get("slat_decoder_mesh")
-    if decoder is None:
-        return
-
-    original = decoder.mesh_extractor
-    sparse_extractor = SparseSparseFeatures2Mesh(
-        device=device,
-        res=original.res,
-        use_color=False # getattr(original, "use_color", False),
-    )
-    decoder.mesh_extractor = sparse_extractor
-    print(
-        f"[SparseMeshExtractor] Injected TripoSF sparse FlexiCubes into "
-        f"slat_decoder_mesh (res={original.res})"
-    )
 
 
 # =====================================================================
@@ -411,51 +375,6 @@ def build_system(
     return TrellisSystem(
         pipeline=pipeline,
         renderers={renderer_key: renderer},
-        guidance=guidance,
-        optimizer_sparse=optimizer_sparse,
-        optimizer_dense=optimizer_dense,
-        strategy=strategy,
-        cfg=cfg,
-        accelerator=accelerator,
-    )
-
-
-def build_hybrid_system(
-    cfg: ml_collections.ConfigDict,
-    accelerator: Accelerator,
-    guidance_factory: callable,
-) -> TrellisSystem:
-    """
-    构建双路渲染系统 — 同时持有 mesh + gs 渲染器。
-
-    与 build_system 的唯一区别：renderers 字典包含两个渲染器
-    {"mesh": TrellisMeshRasterizer, "gs": GaussianRenderer}。
-
-    Args:
-        cfg: 完整配置对象
-        accelerator: Accelerate 分布式训练加速器
-        guidance_factory: Guidance 工厂函数
-
-    Returns:
-        TrellisSystem: 包含双路渲染器的系统实例
-    """
-    device = str(accelerator.device)
-
-    pipeline = _build_pipeline(cfg, accelerator)
-    # 硬编码注入 TripoSF 稀疏 FlexiCubes mesh extractor
-    inject_sparse_mesh_extractor(pipeline, device=device)
-    strategy = _build_strategy(cfg, pipeline, accelerator)
-    guidance, optimizer_sparse = _build_training_components_sparse(
-        cfg, pipeline, strategy, accelerator, guidance_factory,
-    )
-    optimizer_dense = _build_training_components_dense(cfg, pipeline)
-
-    return TrellisSystem(
-        pipeline=pipeline,
-        renderers={
-            "mesh": _build_renderer_of_type(cfg, device, "mesh"),
-            "gs": _build_renderer_of_type(cfg, device, "gs"),
-        },
         guidance=guidance,
         optimizer_sparse=optimizer_sparse,
         optimizer_dense=optimizer_dense,

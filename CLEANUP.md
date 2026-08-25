@@ -40,6 +40,7 @@ for exact paths and this table for the reason and compatibility impact.
 | --- | --- | --- | --- |
 | `cleanup: remove standalone stage-2-only entry points` | Standalone Stage-2-only configuration, training entry point, and multi-node/single-node launchers | The public release exposes only the Dual-Stage Contrastive FlowEdit algorithm; these files duplicated a standalone interface outside that contract | Dual-Stage configuration, entry point, and launchers remain. Shared sparse-stage computation in `autograd_template.py` and operations in `stage_ops.py` remain available to the Dual-Stage path. |
 | `cleanup: remove Hunyuan3D generator` | Vendored Hunyuan3D generator implementation and its standalone launchers | Repository-wide consumer tracing found no import or dynamic path from the retained Dual-Stage implementation; the launchers referenced absent training and configuration files | TRELLIS Dual-Stage training, inference, shared stage operations, and evaluation remain. Hunyuan3D-specific `pymeshlab` and `scikit-image` dependencies were removed. |
+| `cleanup: remove non-dual TRELLIS consumers` | Fifteen legacy Stage-2 configs, five non-dual TRELLIS entries, their single/multi-node launchers, legacy generic/GSO/normal/guidance eval surface, and distillation/GAN-only smoke tests | Static filename/import tracing and config dispatch tracing found these consumers terminate at standalone distillation, bilevel, hybrid, normal-similarity, or GAN paths; none is reachable from the retained Dual-Stage entry, canonical dense FlowEdit evaluator, or contract tests | Dual-Stage config/entry/launchers, shared sparse+dense contrastive steps, `TrellisFlowEditOps` inheritance used by contrastive ops, GS/mesh renderer/data/state/rollout/pipeline/training/checkpoint infrastructure, dense FlowEdit evaluation, Qwen FlowEdit Source-unconditional + Target CFG behavior, and exact archive/environment tests remain. Removed legacy training/eval/test commands are intentionally incompatible; independent GRPO/NFT and Candidate-2 Qwen paradigm/pipeline/discriminator implementations are deferred and retained. |
 
 ## Verification ledger
 
@@ -92,6 +93,8 @@ and documentation before removal.
 
 ## Publishing status
 
-- Private Gongfeng: baseline and reviewed verification fixes are uploaded on
-  `cleanup/dual-stage-release`; no merge to `main` has been performed.
+- Private Gongfeng `main` points to the reviewed release at
+  `2bd59ef34ea55ae12b3842320f8b04b096072db0`. Subsequent reviewed cleanup
+  batches continue on `cleanup/dual-stage-release`; advancing `main` remains a
+  separate, explicit release action.
 - Public GitHub: intentionally deferred.

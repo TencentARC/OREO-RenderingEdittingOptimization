@@ -465,7 +465,7 @@ def create_bilevel_guidance(guidance_cfg: Any, train_device: torch.device) -> "B
     创建 BilevelDistillation (VSD) Guidance 实例。
 
     与 create_guidance 分离，因为 bilevel 需要额外的 LoRA 管理
-    （内部优化器、checkpoint 保存/加载等），调用方也不同（trellis_bilevel.py）。
+    （内部优化器、checkpoint 保存/加载等），调用方与通用 Guidance 入口不同。
 
     ★ 注意：bilevel 仍使用老版运行时参数绑定模式（init 时读取所有参数）。
     compute_guidance 不需要传入 guidance_cfg。
