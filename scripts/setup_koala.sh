@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# KOALA 环境恢复脚本 — flow_grpo_custom_v2 (Trellis Stage 2 Distillation)
+# KOALA 环境恢复脚本 — flow_grpo_custom_v2 (Dual-Stage Contrastive FlowEdit)
 # ============================================================================
 # 用法：
 #   . scripts/setup_koala.sh [--fast] [--qwen-only] [--download]
