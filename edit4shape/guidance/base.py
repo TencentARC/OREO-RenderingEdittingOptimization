@@ -4,7 +4,7 @@ Guidance 模块基础设施。
 提供：
 - GuidanceResult: 统一的返回格式
 - BaseGuidance: 抽象基类，包含共享逻辑
-- create_guidance(): 工厂函数，根据配置创建 Guidance 实例
+- create_guidance(): 工厂函数，创建 retained FlowEdit Guidance
 
 设备分配：
 - Guidance 模型默认运行在 训练设备 + 1 的 GPU 上
@@ -241,7 +241,7 @@ class BaseGuidance(ABC):
             B, V: batch size 和 views
         
         Returns:
-            Pipeline 输出（SDSOutput / CSDOutput / FlowEditPipelineOutput）
+            Pipeline 输出（FlowEditPipelineOutput）
         """
         pass
     
@@ -372,8 +372,8 @@ class BaseGuidance(ABC):
         """
         获取各项 loss 的权重。
         
-        默认返回 {loss_key: 1.0}，适用于 SDS/CSD/CSD-Rev。
-        FlowEdit 需要覆盖此方法，返回细分 loss 权重。
+        默认返回 {loss_key: 1.0}。
+        FlowEdit 可覆盖此方法，返回细分 loss 权重。
         
         Returns:
             Dict[str, float]: {loss_name: weight}
@@ -388,7 +388,7 @@ class BaseGuidance(ABC):
 
 
 # =====================================================================
-# 工厂函数
+# Factory
 # =====================================================================
 
 def create_guidance(
@@ -396,86 +396,21 @@ def create_guidance(
     train_device: torch.device,
     use_pp: bool = False,
 ) -> BaseGuidance:
-    """
-    创建 Guidance 实例。
-    
-    根据 guidance_cfg.type 选择不同的 Guidance 范式。
-    
-    Args:
-        guidance_cfg: Guidance 初始化配置（cfg.guidance），包含：
-            - type: "flowedit" | "distillation"（范式选择）
-            - model_path: 模型路径（共用）
-            - edit_resolution: 工作分辨率（共用）
-            - flowedit: FlowEdit 专属 init 配置
-        train_device: 训练使用的设备（如 cuda:0）
-        use_pp: 是否使用流水线并行版本
-    
-    Returns:
-        BaseGuidance: Guidance 实例
-    
-    Example (trellis2):
-        >>> guidance = create_guidance(cfg.guidance, accelerator.device)
-        >>> result = guidance.compute_guidance(
-        ...     comp_rgb, condition_images,
-        ...     guidance_cfg=cfg.shape.guidance,  # per-stage runtime
-        ... )
-    Example (trellis1):
-        >>> guidance = create_guidance(cfg.guidance, accelerator.device)
-        >>> result = guidance.compute_guidance(
-        ...     comp_rgb, condition_images,
-        ...     guidance_cfg=cfg.train.guidance,  # global runtime
-        ... )
+    """Create the retained ordinary Qwen FlowEdit guidance.
+
+    use_pp selects the retained pipeline-parallel FlowEdit variant.
+    Every other type is rejected so removed experimental stacks cannot be
+    reintroduced through a compatibility branch.
     """
     paradigm = guidance_cfg.type
-    
-    if paradigm == "flowedit":
-        if use_pp:
-            from edit4shape.guidance.paradigms.flowedit import FlowEditGuidancePP
-            return FlowEditGuidancePP(guidance_cfg, train_device)
-        else:
-            from edit4shape.guidance.paradigms.flowedit import FlowEditGuidance
-            return FlowEditGuidance(guidance_cfg, train_device)
-    elif paradigm == "flowedit_gan":
-        from edit4shape.guidance.paradigms.flowedit_gan import FlowEditGANGuidance
-        return FlowEditGANGuidance(guidance_cfg, train_device)
-    elif paradigm == "flowedit_latent_gan":
-        from edit4shape.guidance.paradigms.flowedit_latent_gan import FlowEditLatentGANGuidance
-        return FlowEditLatentGANGuidance(guidance_cfg, train_device)
-    elif paradigm == "flowedit_latent_gan_cfgdiff":
-        from edit4shape.guidance.paradigms.flowedit_latent_gan_cfgdiff import FlowEditLatentGANCFGDiffGuidance
-        return FlowEditLatentGANCFGDiffGuidance(guidance_cfg, train_device)
-    elif paradigm == "flowedit_latent_gan_cfgdiff_bt":
-        from edit4shape.guidance.paradigms.flowedit_latent_gan_cfgdiff_bt import FlowEditLatentGANCFGDiffBTGuidance
-        return FlowEditLatentGANCFGDiffBTGuidance(guidance_cfg, train_device)
-    elif paradigm == "flowedit_triimage_gan":
-        from edit4shape.guidance.paradigms.flowedit_triimage_gan import FlowEditTriImageGANGuidance
-        return FlowEditTriImageGANGuidance(guidance_cfg, train_device)
-    elif paradigm == "flowedit_latent_gan_cfgdiff_triimage":
-        from edit4shape.guidance.paradigms.flowedit_latent_gan_cfgdiff_triimage import FlowEditLatentGANCFGDiffTriImageGuidance
-        return FlowEditLatentGANCFGDiffTriImageGuidance(guidance_cfg, train_device)
-    elif paradigm == "distillation":
-        from edit4shape.guidance.paradigms.distillation import DistillationGuidance
-        return DistillationGuidance(guidance_cfg, train_device)
-    else:
-        raise ValueError(f"Unknown guidance type: {paradigm}. Choose from: flowedit, flowedit_gan, flowedit_triimage_gan, flowedit_latent_gan, flowedit_latent_gan_cfgdiff, flowedit_latent_gan_cfgdiff_bt, flowedit_latent_gan_cfgdiff_triimage, distillation")
+    if paradigm != "flowedit":
+        raise ValueError(
+            f"Unknown guidance type: {paradigm!r}; only 'flowedit' is retained"
+        )
 
+    if use_pp:
+        from edit4shape.guidance.paradigms.flowedit import FlowEditGuidancePP
+        return FlowEditGuidancePP(guidance_cfg, train_device)
 
-def create_bilevel_guidance(guidance_cfg: Any, train_device: torch.device) -> "BilevelDistillationGuidance":
-    """
-    创建 BilevelDistillation (VSD) Guidance 实例。
-
-    与 create_guidance 分离，因为 bilevel 需要额外的 LoRA 管理
-    （内部优化器、checkpoint 保存/加载等），调用方与通用 Guidance 入口不同。
-
-    ★ 注意：bilevel 仍使用老版运行时参数绑定模式（init 时读取所有参数）。
-    compute_guidance 不需要传入 guidance_cfg。
-
-    Args:
-        guidance_cfg: Guidance 初始化配置（cfg.guidance），需包含 bilevel_distillation 子配置
-        train_device: 训练使用的设备（如 cuda:0）
-
-    Returns:
-        BilevelDistillationGuidance 实例
-    """
-    from edit4shape.guidance.paradigms.bilevel_distillation import BilevelDistillationGuidance
-    return BilevelDistillationGuidance(guidance_cfg, train_device)
+    from edit4shape.guidance.paradigms.flowedit import FlowEditGuidance
+    return FlowEditGuidance(guidance_cfg, train_device)

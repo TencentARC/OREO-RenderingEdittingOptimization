@@ -1,7 +1,7 @@
 """
 Trellis 共享前向传播、渲染、评估函数。
 
-从 system.py 提取的纯计算函数，供 standard / autograd / bilevel 入口复用。
+从 system.py 提取的纯计算函数，供 retained Dual-Stage 入口与评估器复用。
 
 主要组件：
 1. decode_and_render_mesh: 解码 SparseTensor → Mesh → 渲染多视角图像
@@ -342,4 +342,3 @@ def evaluate(
             )
 
     return {"eval_done": 1.0}
-
