@@ -5,8 +5,9 @@ FlowEditPipeline 迭代优化测试脚本。
 验证 FlowEdit 双分支差分编辑 + CSD Loss 迭代优化是否有效。
 
 配置约定（与训练一致）：
-- target_prompt = prompt, negative_prompt_tgt = negative_prompt
-- Target 使用 cfg_scale，Source 只使用 unconditional prediction
+- target_prompt = source_prompt = prompt
+- negative_prompt_tgt = negative_prompt_src = negative_prompt
+- true_cfg_scale_tgt = cfg_scale, true_cfg_scale_src = -cfg_scale
 
 流程：
 1. 加载 FlowEditPipeline
@@ -73,13 +74,20 @@ def run_flowedit(pipe, latent, current_image, condition_image, args, device, ste
     """
     调用 FlowEdit Pipeline 一次。
 
-    配置约定：Target 使用 CFG，Source 只使用 negative prompt 的 unconditional 预测。
+    配置约定：
+    - target_prompt = source_prompt = args.prompt
+    - negative_prompt_tgt = negative_prompt_src = args.negative_prompt
+    - true_cfg_scale_tgt = +args.cfg_scale
+    - true_cfg_scale_src = -args.cfg_scale
     """
     return pipe(
         image=[current_image, condition_image],
         target_prompt=args.prompt,
+        source_prompt=args.prompt,
+        negative_prompt_src=args.negative_prompt,
         negative_prompt_tgt=args.negative_prompt,
         num_inference_steps=args.num_inference_steps,
+        true_cfg_scale_src=-args.cfg_scale,
         true_cfg_scale_tgt=args.cfg_scale,
         guidance_scale=args.guidance_scale,
         n_max=args.n_max,

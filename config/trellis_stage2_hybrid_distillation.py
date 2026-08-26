@@ -34,6 +34,7 @@ def _flowedit_normal_runtime_config():
     # ── Normal 路可独立覆写的参数 ──
     # 例如：Normal guidance 可能需要不同的 prompt
     cfg.target_prompt = "Rotate the camera. Convert to normal map."
+    cfg.source_prompt = cfg.target_prompt
     cfg.bg_color = [0.5, 0.5, 0.5]  # 灰色，与 mesh renderer 一致
     cfg.loss.tgt_branch = 1.0 # normal 的 tgt 分支权重 大一些能保留形状
     return cfg
@@ -47,6 +48,7 @@ def _flowedit_color_runtime_config():
     cfg = _flowedit_runtime_config()
     # ── Color 路可独立覆写的参数 ──
     cfg.target_prompt = "Rotate the camera."
+    cfg.source_prompt = cfg.target_prompt
     cfg.bg_color = [1.0, 1.0, 1.0]  # 白色，与 gs renderer 一致
     cfg.loss.tgt_branch = 0.1 # gs 的 tgt 分支权重 小一些能保留颜色
     return cfg

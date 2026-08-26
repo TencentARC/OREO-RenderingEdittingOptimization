@@ -52,6 +52,11 @@ def _flowedit_runtime_config():
     cfg.target_prompt = "Rotate the camera. White background."
     cfg.negative_prompt_tgt = " "
 
+    # Source 分支
+    cfg.true_cfg_scale_src = -1 * cfg.true_cfg_scale_tgt  # 反向引导
+    cfg.source_prompt = cfg.target_prompt
+    cfg.negative_prompt_src = cfg.negative_prompt_tgt
+
     # 多步 Loss 聚合（仅 compute_guidance 路径使用，edit() 路径不需要）
     cfg.reduce_mode = "final"
     cfg.ada_normalize = False

@@ -7,10 +7,10 @@ Generate → FlowEdit Refine 测试脚本。
   Stage 2: 用 FlowEditPipeline 对生成结果做差分 Refine
 
 Refine 配置约定：
-  - target_prompt = prompt（与生成相同）
-  - negative_prompt_tgt = negative_prompt（同时用于 Source unconditional prediction）
+  - target_prompt = source_prompt = prompt（与生成相同）
+  - negative_prompt_tgt = negative_prompt_src = negative_prompt（与生成相同）
   - true_cfg_scale_tgt = +cfg_scale
-  - Source 分支不使用 CFG
+  - true_cfg_scale_src = -cfg_scale（负 CFG，核心创新点）
 
 复用现有 pipeline，不创建新的 pipeline 类。
 """
@@ -243,8 +243,11 @@ def main():
         refine_result = pipe_flow(
             image=[current_image, input_image],
             target_prompt=args.prompt,
+            source_prompt=args.prompt,
             negative_prompt_tgt=neg_prompt,
+            negative_prompt_src=neg_prompt,
             true_cfg_scale_tgt=refine_cfg,
+            true_cfg_scale_src=-refine_cfg,       # 负 CFG（核心）
             src_latent=current_latent,             # Stage 1 输出（或上轮 refine 输出）
             num_inference_steps=args.refine_steps,
             n_max=args.refine_n_max,

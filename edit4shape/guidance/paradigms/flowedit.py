@@ -190,9 +190,12 @@ class FlowEditGuidance(BaseGuidance):
         output = self.pipe(
             image=[rendered_pil, condition_pil],
             target_prompt=flowedit_cfg.target_prompt,
+            source_prompt=flowedit_cfg.source_prompt,
             generator=generator,
+            negative_prompt_src=flowedit_cfg.negative_prompt_src,
             negative_prompt_tgt=flowedit_cfg.negative_prompt_tgt,
             num_inference_steps=ic.steps,
+            true_cfg_scale_src=flowedit_cfg.true_cfg_scale_src,
             true_cfg_scale_tgt=flowedit_cfg.true_cfg_scale_tgt,
             n_max=ic.n_max,
             noise_mode=ic.noise_mode,
