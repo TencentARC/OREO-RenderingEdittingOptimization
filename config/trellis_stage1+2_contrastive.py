@@ -93,7 +93,7 @@ def get_config():
     cfg.checkpoint = ""
     cfg.eval_only = False
     # Keep the training precision explicit so it is persisted with each run.
-    cfg.mixed_precision = "bf16"
+    cfg.mixed_precision = "no"
 
     # === 频率控制 ===
     cfg.freq = ml_collections.ConfigDict()

@@ -46,7 +46,7 @@ class DualStageConfigContractTest(unittest.TestCase):
         cls.entry = _parse(ENTRY_PATH)
 
     def test_reference_defaults_match_reference_run(self) -> None:
-        self.assertEqual(_constant_assignment(self.config, "cfg.mixed_precision"), "bf16")
+        self.assertEqual(_constant_assignment(self.config, "cfg.mixed_precision"), "no")
         self.assertEqual(
             _constant_assignment(self.config, "tr.student_denoise_cfg"), False
         )
