@@ -92,6 +92,8 @@ def get_config():
     cfg.num_epochs = 500
     cfg.checkpoint = ""
     cfg.eval_only = False
+    # Keep the training precision explicit so it is persisted with each run.
+    cfg.mixed_precision = "bf16"
 
     # === 频率控制 ===
     cfg.freq = ml_collections.ConfigDict()
@@ -195,6 +197,6 @@ def get_config():
     tr.loss.contrastive.adaptive_swap = False
     # 对比 teacher 正/负样本是否使用 CFG（独立于 student_denoise_cfg）
     # True = teacher 保持 CFG（zeros uncond），False = teacher 不用 CFG
-    tr.loss.contrastive.teacher_cfg = False
+    tr.loss.contrastive.teacher_cfg = True
 
     return cfg
