@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Common entry point for the two authorized teacher-CFG A/B runs.  The two
-# public wrappers in this directory pass the only training-variable value;
-# this file deliberately contains no source-rewriting path.
+# Common entry point for the authorized teacher-CFG runs.  The public wrappers
+# pass the teacher-CFG value; the dedicated yaw-range wrapper additionally
+# supplies the one explicitly allowed training-range override.  This file
+# deliberately contains no source-rewriting path.
 
 TEACHER_CFG="${1:-}"
 shift || true
@@ -13,6 +14,23 @@ case "${TEACHER_CFG}" in
     *)
         echo "ERROR: expected teacher_cfg true or false, got: ${TEACHER_CFG}" >&2
         exit 2
+        ;;
+esac
+
+# Keep the original A/B launchers on the baseline config.  The dedicated
+# yaw-range wrapper selects the derived config module below; this avoids the
+# unsupported list-valued config_flags CLI override and keeps the variant
+# immutable.  Other positional arguments retain the legacy ignored behavior.
+BASE_CONFIG_PATH="config/trellis_stage1+2_contrastive.py"
+YAW_CONFIG_PATH="config/trellis_stage1+2_contrastive_yaw90_270.py"
+CONFIG_PATH="${BASE_CONFIG_PATH}"
+TRAIN_YAW_RANGE_EFFECTIVE="[0.0,360.0]"
+CONFIG_ARG="${1:-}"
+case "${CONFIG_ARG}" in
+    "--config=${YAW_CONFIG_PATH}")
+        CONFIG_PATH="${YAW_CONFIG_PATH}"
+        TRAIN_YAW_RANGE_EFFECTIVE="[90.0,270.0]"
+        shift || true
         ;;
 esac
 
@@ -87,6 +105,8 @@ target_prompt=Rotate the camera. White background.
 source_prompt=Rotate the camera. White background.
 teacher_cfg=${TEACHER_CFG}
 mixed_precision=no
+config=${CONFIG_PATH}
+train_yaw_range=${TRAIN_YAW_RANGE_EFFECTIVE}
 checkpoint=
 student_denoise_cfg=false
 seed=42
@@ -102,7 +122,7 @@ world_size=8
 EOF
 
 printf '%s\n' \
-    "{\"status\":\"STARTING\",\"source_commit\":\"${SOURCE_COMMIT}\",\"code_bundle_uri\":\"${CODE_BUNDLE_URI}\",\"qwen_commit\":\"${QWEN_COMMIT}\",\"teacher_cfg\":${TEACHER_CFG},\"mixed_precision\":\"no\",\"source_cfg_scale\":-4,\"target_cfg_scale\":4,\"student_denoise_cfg\":false,\"flowedit_steps\":12,\"flowedit_n_max\":9,\"world_size\":8}" \
+    "{\"status\":\"STARTING\",\"source_commit\":\"${SOURCE_COMMIT}\",\"code_bundle_uri\":\"${CODE_BUNDLE_URI}\",\"qwen_commit\":\"${QWEN_COMMIT}\",\"teacher_cfg\":${TEACHER_CFG},\"mixed_precision\":\"no\",\"config\":\"${CONFIG_PATH}\",\"train_yaw_range\":${TRAIN_YAW_RANGE_EFFECTIVE},\"source_cfg_scale\":-4,\"target_cfg_scale\":4,\"student_denoise_cfg\":false,\"flowedit_steps\":12,\"flowedit_n_max\":9,\"world_size\":8}" \
     > "${STATUS_DIR}/status.json"
 sync_run
 
@@ -121,7 +141,7 @@ if python -m accelerate.commands.launch \
     --multi_gpu \
     --main_process_port=29512 \
     -m edit4shape.systems.trellis.entries.contrastive_dualstage_autograd \
-    --config=config/trellis_stage1+2_contrastive.py \
+    --config="${CONFIG_PATH}" \
     --config.eval_only=False \
     --config.use_wandb=True \
     --config.run_name="${RUN_NAME}" \
@@ -144,7 +164,7 @@ else
 fi
 
 printf '%s\n' \
-    "{\"status\":\"${training_status}\",\"source_commit\":\"${SOURCE_COMMIT}\",\"code_bundle_uri\":\"${CODE_BUNDLE_URI}\",\"qwen_commit\":\"${QWEN_COMMIT}\",\"teacher_cfg\":${TEACHER_CFG},\"mixed_precision\":\"no\",\"source_cfg_scale\":-4,\"target_cfg_scale\":4,\"student_denoise_cfg\":false,\"flowedit_steps\":12,\"flowedit_n_max\":9,\"world_size\":8}" \
+    "{\"status\":\"${training_status}\",\"source_commit\":\"${SOURCE_COMMIT}\",\"code_bundle_uri\":\"${CODE_BUNDLE_URI}\",\"qwen_commit\":\"${QWEN_COMMIT}\",\"teacher_cfg\":${TEACHER_CFG},\"mixed_precision\":\"no\",\"config\":\"${CONFIG_PATH}\",\"train_yaw_range\":${TRAIN_YAW_RANGE_EFFECTIVE},\"source_cfg_scale\":-4,\"target_cfg_scale\":4,\"student_denoise_cfg\":false,\"flowedit_steps\":12,\"flowedit_n_max\":9,\"world_size\":8}" \
     > "${STATUS_DIR}/status.json"
 if [ "${training_status}" = "FAILED" ]; then
     exit 1
