@@ -1,25 +1,27 @@
 # OREO: Fidelity Alignment in 3D Generation via On-the-fly Rendering-Editing Optimization
 
+**Zhiyuan Ma<sup>1,2</sup> · Wenbo Hu<sup>2</sup> · Wang Zhao<sup>2</sup> · Pengfei Wang<sup>1</sup> · Ying Shan<sup>2</sup> · Lei Zhang<sup>1</sup>**
+
+<sup>1</sup> The Hong Kong Polytechnic University · <sup>2</sup> Tencent ARC Lab
+
+[Project Page](https://theericma.github.io/oreo/)
+
 Official code release for **OREO**, an alignment framework that improves the visual fidelity of 3D generators with 2D diffusion priors.
 
-[Project page](https://theericma.github.io/oreo/)
+## 🌟 Overview
 
-## Overview
+Despite recent progress in 3D generation, pretrained 3D generators can still produce assets with limited visual fidelity. OREO addresses this gap with an on-the-fly render-edit-optimize loop:
 
-OREO uses a render-edit-optimize loop to align a pretrained 3D generator with the visual prior of a 2D image editor. The current release implements the Dual-Stage Contrastive FlowEdit path for TRELLIS.
+1. **Reinforced Editing** renders views from the current 3D output and uses a 2D diffusion editor to improve their visual fidelity while preserving geometric structure.
+2. **Contrastive Distillation** treats edited and original renderings as positive and negative supervision, then transfers the fidelity gap to the 3D generator with a latent contrastive objective.
 
-The method has two main components:
+This release implements the **Dual-Stage Contrastive FlowEdit** path for TRELLIS, including sparse and dense stage training, Dense FlowEdit evaluation, public model and dataset download helpers, and checkpoint export utilities.
 
-- **Reinforced Editing** renders views from the current 3D output and edits them with a 2D diffusion prior while preserving the rendered structure.
-- **Contrastive Distillation** treats edited and original renderings as positive and negative supervision and transfers the resulting fidelity gap to the 3D generator through a latent contrastive objective.
-
-The released training path jointly optimizes the sparse and dense TRELLIS stages. It includes training launchers, the canonical Dense FlowEdit evaluator, model and dataset download helpers, and checkpoint export utilities.
-
-## Repository structure
+## 📁 Repository structure
 
 ```text
-config/                         Training configuration
-edit4shape/                    OREO training, guidance, rollout, and TRELLIS code
+config/                         Training configurations
+edit4shape/                    OREO guidance, rollout, renderer, and TRELLIS systems
 scripts/download/              Public model and dataset download helpers
 scripts/eval/                  Dense FlowEdit evaluation
 scripts/export/                Checkpoint export utilities
@@ -28,13 +30,13 @@ scripts/single_node/           Single-GPU or local training launcher
 SETUP.md                       Environment, model, data, and offline setup
 ```
 
-## Installation and assets
+## ⚙️ Installation and assets
 
-See [`SETUP.md`](SETUP.md) for the verified Python/CUDA environment, public model downloads, dataset preparation, and offline cache setup.
+Please follow [`SETUP.md`](SETUP.md) for the verified Python/CUDA environment, public model downloads, dataset preparation, and offline cache setup.
 
-## Training
+## 🚀 Quick start
 
-After completing the setup, run a local single-GPU or small-scale experiment with:
+After completing the setup, run a local single-GPU experiment with:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 \
@@ -48,9 +50,19 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
 bash scripts/multi_node/main_trellis_dualstage_contrast.sh
 ```
 
-Both launchers use [`config/trellis_stage1+2_contrastive.py`](config/trellis_stage1+2_contrastive.py) and run `edit4shape.systems.trellis.entries.contrastive_dualstage_autograd`. Set `RUN_NAME` or pass configuration overrides to customize a run.
+Both launchers use [`config/trellis_stage1+2_contrastive.py`](config/trellis_stage1+2_contrastive.py) and run `edit4shape.systems.trellis.entries.contrastive_dualstage_autograd`.
 
-## Evaluation
+## 🚋 Training
+
+The retained training path jointly optimizes the sparse and dense TRELLIS stages. To customize an experiment, set `RUN_NAME` or pass configuration overrides to the launcher:
+
+```bash
+RUN_NAME=my_experiment \
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+bash scripts/multi_node/main_trellis_dualstage_contrast.sh
+```
+
+## 📊 Evaluation
 
 The canonical evaluator compares the pretrained teacher path with the finetuned student path using Dense FlowEdit and CLIP/DINO metrics:
 
@@ -59,7 +71,7 @@ bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh \
   /path/to/checkpoints/checkpoint_10_3157 alphaimages
 ```
 
-The wrapper also accepts `alphaimage_train`, `gso_selected`, and `toys4k`. FlowEdit parameters can be passed after the dataset name:
+The evaluation wrapper also accepts `alphaimage_train`, `gso_selected`, and `toys4k`. FlowEdit parameters can be overridden after the dataset name:
 
 ```bash
 bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh \
@@ -69,9 +81,7 @@ bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh \
   --config.rollout.flowedit.cfg_scale_src=-4.0
 ```
 
-For a custom process layout, launch [`scripts/eval/eval_trellis_dense_flowedit.py`](scripts/eval/eval_trellis_dense_flowedit.py) directly with `accelerate`.
-
-## Checkpoint export
+## 📦 Checkpoint export
 
 ```bash
 bash scripts/export/export_checkpoint.sh \
@@ -79,9 +89,9 @@ bash scripts/export/export_checkpoint.sh \
   /path/to/output
 ```
 
-## Citation
+## 📚 Citation
 
-If you use this code or build on OREO, please cite:
+If you use OREO or this codebase in your research, please cite:
 
 ```bibtex
 @inproceedings{ma2026oreo,
