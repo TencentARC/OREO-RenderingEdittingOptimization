@@ -66,12 +66,12 @@ def sde_step_with_logprob(
             - torch.log(std_dev_t * torch.sqrt(-1*dt))
             - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
         )
-    
+
     elif sde_type == 'cps':
         std_dev_t = sigma_prev  * math.sin(noise_level * math.pi / 2) # sigma_t in paper
         pred_original_sample = sample - sigma * model_output # predicted x_0 in paper
         noise_estimate = sample + model_output * (1 - sigma) # predicted x_1 in paper
-        # detach x_1 (noise_estimate) 以统一梯度方向（始终为负），避免正负抵消导致的训练不稳定
+        # detach x_1 (noise_estimate) Use a unified gradient direction (always negative) to avoid training instability caused by positive and negative offsets.
         prev_sample_mean = pred_original_sample * (1 - sigma_prev) + noise_estimate.detach() * torch.sqrt(sigma_prev**2 - std_dev_t**2)
 
         if prev_sample is None:
@@ -88,14 +88,14 @@ def sde_step_with_logprob(
 
     # mean along all but batch dimension
     log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
-    
+
     if return_sqrt_dt:
         return prev_sample, log_prob, prev_sample_mean, std_dev_t, torch.sqrt(-1*dt)
     return prev_sample, log_prob, prev_sample_mean, std_dev_t
 
 
 def sde_step_with_logprob_sparse(
-    self,  # FlowScheduler，需提供 sigmas 和 index_for_timestep
+    self,  # FlowScheduler, need to provide sigmas and index_for_timestep
     model_output: "SparseTensor",
     timestep: float,
     sample: "SparseTensor",
@@ -106,47 +106,47 @@ def sde_step_with_logprob_sparse(
     return_sqrt_dt: bool = False,
 ):
     """
-    SparseTensor 版本的 SDE 步进，用于 Trellis Flow Matching。
-    
+    SparseTensor version SDE stepper for Trellis Flow Matching.
+
     Args:
-        model_output: 速度场预测 v，SparseTensor，feats shape (N, C)
-        timestep: 当前时间步，标量 float
-        sample: 当前样本 x_t，SparseTensor，feats shape (N, C)
-        noise_level: 噪声水平
-        prev_sample: 可选，已知的下一步样本
-        generator: 随机数生成器
-        sde_type: 'sde' 或 'cps'
-        return_sqrt_dt: 是否返回 sqrt_dt
-        
+        model_output: Velocity field prediction v,SparseTensor,feats shape (N, C)
+        timestep: current time step, scalar float
+        sample: current sample x_t,SparseTensor,feats shape (N, C)
+        noise_level: noise level
+        prev_sample: Optional, known next step sample
+        generator: random number generator
+        sde_type: 'sde' or 'cps'
+        return_sqrt_dt: Whether to return sqrt_dt
+
     Returns:
         prev_sample: SparseTensor
-        log_prob: Tensor (B,), 每个 batch 的对数概率
+        log_prob: Tensor (B,), each batch The logarithmic probability of
         prev_sample_mean: SparseTensor
         std_dev_t: Tensor
     """
-    # 使用传入 sample 的类型，避免导入不同模块的 SparseTensor 导致 isinstance 检查失败
+    # Use incoming sample type to avoid importing different modules SparseTensor cause isinstance Check failed
     SparseClass = sample.__class__
-    
-    # 提取 feats，转 float32 防溢出
+
+    # Extract feats, turn float32 Spill proof
     v = model_output.feats.float()  # (N, C)
     x_t = sample.feats.float()  # (N, C)
     x_prev = prev_sample.feats.float() if prev_sample is not None else None
-    batch_indices = sample.coords[:, 0]  # (N,) batch 索引
+    batch_indices = sample.coords[:, 0]  # (N,) batch Index
     orig_dtype = sample.feats.dtype
 
-    # 获取 sigma（索引 Tensor 后仍是 Tensor）
+    # get sigma(Index Tensor still after Tensor)
     idx = self.index_for_timestep(timestep)
-    sigma = self.sigmas[idx]  # Tensor 标量
-    sigma_prev = self.sigmas[idx + 1]  # Tensor 标量
-    sigma_max = self.sigmas[1]  # Tensor（不要调用 .item()）
-    dt = sigma_prev - sigma  # 负值
+    sigma = self.sigmas[idx]  # Tensor scalar
+    sigma_prev = self.sigmas[idx + 1]  # Tensor scalar
+    sigma_max = self.sigmas[1]  # Tensor(Do not call .item())
+    dt = sigma_prev - sigma  # negative value
 
     if sde_type == 'sde':
-        # 使用 torch.where 避免 Python 条件表达式的类型问题
+        # Use torch.where avoid Python Conditional expression type issues
         sigma_safe = torch.where(sigma == 1, sigma_max, sigma)
         std_dev_t = torch.sqrt(sigma_safe / (1 - sigma_safe)) * noise_level
 
-        # SDE 均值
+        # SDE mean
         prev_sample_mean = x_t*(1+std_dev_t**2/(2*sigma)*dt)+v*(1+std_dev_t**2*(1-sigma)/(2*sigma))*dt  # (N, C)
 
         sqrt_neg_dt = torch.sqrt(-dt)
@@ -164,12 +164,12 @@ def sde_step_with_logprob_sparse(
             - torch.log(scale)
             - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
         )  # (N, C)
-    
+
     elif sde_type == 'cps':
         std_dev_t = sigma_prev * math.sin(noise_level * math.pi / 2)
         pred_original_sample = x_t - sigma * v  # (N, C)
         noise_estimate = x_t + v * (1 - sigma)  # (N, C)
-        # detach x_1 (noise_estimate) 以统一梯度方向（始终为负），避免正负抵消导致的训练不稳定
+        # detach x_1 (noise_estimate) Use a unified gradient direction (always negative) to avoid training instability caused by positive and negative offsets.
         prev_sample_mean = pred_original_sample * (1 - sigma_prev) + noise_estimate.detach() * torch.sqrt(sigma_prev**2 - std_dev_t**2)  # (N, C)
 
         sqrt_neg_dt = torch.sqrt(-dt)
@@ -182,11 +182,11 @@ def sde_step_with_logprob_sparse(
             prev_sample_feats = x_prev
 
         log_prob = -((prev_sample_feats.detach() - prev_sample_mean) ** 2)  # (N, C)
-    
+
     else:
         raise ValueError(f"Unknown sde_type: {sde_type}")
 
-    # 按 batch 聚合 log_prob: (N, C) → (B,)
+    # press batch aggregation log_prob: (N, C) → (B,)
     log_prob = log_prob.mean(dim=-1)  # (N,)
     num_batches = int(batch_indices.max().item()) + 1
     log_prob_sum = torch.zeros(num_batches, device=log_prob.device, dtype=log_prob.dtype)  # (B,)
@@ -194,11 +194,11 @@ def sde_step_with_logprob_sparse(
     log_prob_sum.scatter_add_(0, batch_indices.long(), log_prob)  # (B,)
     counts.scatter_add_(0, batch_indices.long(), torch.ones_like(log_prob))  # (B,)
     log_prob = log_prob_sum / counts.clamp(min=1)  # (B,)
-    
-    # 封装回 SparseTensor（使用动态获取的类，避免跨模块类型不匹配）
+
+    # encapsulate back SparseTensor(Use dynamically obtained classes to avoid cross-module type mismatch)
     prev_sample_out = SparseClass(coords=sample.coords, feats=prev_sample_feats.to(orig_dtype))
     prev_sample_mean_out = SparseClass(coords=sample.coords, feats=prev_sample_mean.to(orig_dtype))
-    
+
     if return_sqrt_dt:
         return prev_sample_out, log_prob, prev_sample_mean_out, std_dev_t, sqrt_neg_dt
     return prev_sample_out, log_prob, prev_sample_mean_out, std_dev_t

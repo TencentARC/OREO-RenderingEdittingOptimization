@@ -1,7 +1,7 @@
 """
-Trellis State 模块
+Trellis State module
 
-提供 TrellisState / TrellisContrastiveState / StageLatent 状态容器类。
+provide TrellisState / TrellisContrastiveState / StageLatent State container class.
 """
 
 from .stage_latent import StageLatent

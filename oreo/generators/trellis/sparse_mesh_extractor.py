@@ -1,11 +1,11 @@
 """
 Sparse FlexiCubes mesh extractor for Trellis v1.
-底层算法直接从 TripoSF import，避免代码重复和出错。
-仅调整 SDF 预处理以匹配 Trellis decoder 输出。
+The underlying algorithm is directly derived from TripoSF import, to avoid code duplication and errors.
+Adjust only SDF preprocessed to match Trellis decoder output.
 """
 import torch
 
-# 从 TripoSF 直接 import 底层算法（纯 torch 操作，无类型冲突）
+# from TripoSF direct import The underlying algorithm (pure torch operation, no type conflicts)
 from triposf.representations.mesh.flexicubes.flexicubes import FlexiCubes as TripoSFFlexiCubes
 from triposf.representations.mesh.utils_cube import (
     sparse_cube2verts,
@@ -13,7 +13,7 @@ from triposf.representations.mesh.utils_cube import (
     get_defomed_verts,
     cube_corners,
 )
-# MeshExtractResult 也可以直接用 TripoSF 的
+# MeshExtractResult You can also use it directly TripoSF of
 from triposf.representations.mesh import MeshExtractResult
 
 from easydict import EasyDict as edict
@@ -21,16 +21,16 @@ from easydict import EasyDict as edict
 
 class SparseFeatures2Mesh:
     """
-    Trellis v1 专用稀疏 mesh 提取器。
-    
-    与 TripoSF 的差异：去掉 sdf * (4/res) 缩放，
-    因为 Trellis decoder 训练时未做此缩放。
+    Trellis v1 dedicated sparse mesh Extractor.
+
+    with TripoSF Difference: remove sdf * (4/res) zoom,
+    because Trellis decoder This scaling was not done during training.
     """
     def __init__(self, device="cuda", res=64, use_color=False):
         self.device = device
         self.res = res
         self.use_color = use_color
-        self.mesh_extractor = TripoSFFlexiCubes(device=device)  # 直接用 TripoSF 的稀疏 FlexiCubes
+        self.mesh_extractor = TripoSFFlexiCubes(device=device)  # Use directly TripoSF of sparse FlexiCubes
         self.sdf_bias = -1.0 / res
         self._calc_layout()
 
@@ -58,17 +58,17 @@ class SparseFeatures2Mesh:
     def __call__(self, cubefeats, training=False):
         assert not self.use_color, "Sparse version does not support color"
 
-        coords = cubefeats.coords[:, 1:]  # (N, 3) 去掉 batch 维
+        coords = cubefeats.coords[:, 1:]  # (N, 3) remove batch dimension
         feats = cubefeats.feats            # (N, C)
 
         sdf, deform, color, weights = [
             self.get_layout(feats, name) for name in ['sdf', 'deform', 'color', 'weights']
         ]
-        # ⚠️ 关键：不做 sdf * (4/res) 缩放，仅加 bias
+        # ⚠️ Key: don't do it sdf * (4/res) Zoom, add only bias
         sdf += self.sdf_bias
 
         v_attrs = [sdf, deform]
-        v_pos, v_attrs, reg_loss = sparse_cube2verts(  # 直接用 TripoSF 的函数
+        v_pos, v_attrs, reg_loss = sparse_cube2verts(  # Use directly TripoSF function
             coords, torch.cat(v_attrs, dim=-1), training=training
         )
 
@@ -82,7 +82,7 @@ class SparseFeatures2Mesh:
         x_nx3 = torch.cat((x_nx3, torch.ones((1, 3), dtype=x_nx3.dtype, device=x_nx3.device) * 0.5))
         sdf_d = torch.cat((sdf_d, torch.ones((1,), dtype=sdf_d.dtype, device=sdf_d.device)))
 
-        # 构建稀疏 cube 索引
+        # Build sparsity cube Index
         mask_reg_c_sparse = (v_pos_dilate[..., 0] * res_v + v_pos_dilate[..., 1]) * res_v + v_pos_dilate[..., 2]
         reg_c_sparse = (coords_dilate[..., 0] * res_v + coords_dilate[..., 1]) * res_v + coords_dilate[..., 2]
         cube_corners_bias = (cube_corners[:, 0] * res_v + cube_corners[:, 1]) * res_v + cube_corners[:, 2]

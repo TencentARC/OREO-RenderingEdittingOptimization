@@ -11,32 +11,32 @@ from oreo.generators.base.rollout import sde_step_with_logprob_sparse
 
 class TrellisFlowScheduler(FlowScheduler):
     """
-    Trellis 专用 Flow Matching 调度器。
-    
-    继承基类的 set_timesteps、sigmas、index_for_timestep，
-    额外提供 SparseTensor 的 ODE step 和 SDE step 方法。
+    Trellis dedicated Flow Matching scheduler.
+
+    Inherited from base class set_timesteps,sigmas,index_for_timestep,
+    additionally provided SparseTensor of ODE step and SDE step method.
     """
-    
+
     def step(self, noise_pred: SparseTensor, t: Union[float, torch.Tensor], latents: SparseTensor) -> SimpleNamespace:
         """
-        Euler ODE 步进：x_{t-1} = x_t - (t - t_prev) * v
-        
+        Euler ODE Step:x_{t-1} = x_t - (t - t_prev) * v
+
         Args:
-            noise_pred: 速度场预测 v，SparseTensor
-            t: 当前时间步，标量
-            latents: 当前样本 x_t，SparseTensor
-            
+            noise_pred: Velocity field prediction v,SparseTensor
+            t: current time step, scalar
+            latents: current sample x_t,SparseTensor
+
         Returns:
             SimpleNamespace(prev_sample=SparseTensor, pred_original_sample=None)
         """
         t_val = float(t)
         idx = self.index_for_timestep(t_val)
         t_prev = float(self.timesteps[idx + 1].item())
-        delta = t_val - t_prev  # 时间差
-        
+        delta = t_val - t_prev  # time difference
+
         pred_feats = latents.feats - delta * noise_pred.feats  # (N, C)
         prev_sample = SparseTensor(coords=latents.coords, feats=pred_feats)
-        
+
         return SimpleNamespace(prev_sample=prev_sample, pred_original_sample=None)
 
     def sde_step(
@@ -51,24 +51,24 @@ class TrellisFlowScheduler(FlowScheduler):
         return_sqrt_dt: bool = False,
     ):
         """
-        SDE 步进，调用 rollout.sde_step_with_logprob_sparse。
-        
+        SDE step, call rollout.sde_step_with_logprob_sparse.
+
         Args:
-            noise_pred: 速度场预测 v，SparseTensor
-            t: 当前时间步，标量 float
-            latents: 当前样本 x_t，SparseTensor
-            noise_level: 噪声强度 (默认 0.7)
-            prev_sample: 如果提供，使用此样本计算 log_prob
-            generator: 随机数生成器
-            sde_type: 'sde' 或 'cps'
-            return_sqrt_dt: 是否返回 sqrt_dt
-            
+            noise_pred: Velocity field prediction v,SparseTensor
+            t: current time step, scalar float
+            latents: current sample x_t,SparseTensor
+            noise_level: Noise intensity (Default 0.7)
+            prev_sample: If provided, use this sample calculation log_prob
+            generator: random number generator
+            sde_type: 'sde' or 'cps'
+            return_sqrt_dt: Whether to return sqrt_dt
+
         Returns:
             prev_sample: SparseTensor
             log_prob: Tensor (B,)
             prev_sample_mean: SparseTensor
             std_dev_t: Tensor
-            (可选) sqrt_dt: Tensor
+            (Optional) sqrt_dt: Tensor
         """
         return sde_step_with_logprob_sparse(
             self,

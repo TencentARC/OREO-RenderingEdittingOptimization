@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-TRELLIS 训练适配器。
+TRELLIS Training adapter.
 
-核心功能：
-- SparseLinearLora: LoRA 层实现，仅对 feats 路径施加 LoRA
-- register_sparse_linear_with_peft: 将 SparseLinear 的 LoRA 注册到 PEFT
-- build_optimizer_for_sparse: 为 slat_flow_model (Sparse Stage 2) 构建优化器
-- build_optimizer_for_dense: 为 sparse_structure_flow_model (Dense Stage 1) 构建优化器
-- set_slat_trainable: 设置 slat_flow_model 为可训练（冻结其他模型）
-- inject_lora_to_slat: 向 slat_flow_model 注入 LoRA 层
-- TrellisFullFinetuneStrategy: Trellis 全参微调策略
-- TrellisLoRAStrategy: Trellis LoRA 微调策略
-- TrellisFrozenStrategy: Trellis 冻结策略（推理模式）
+Core functions:
+- SparseLinearLora: LoRA layer implementation, only for feats path applied LoRA
+- register_sparse_linear_with_peft: will SparseLinear of LoRA Register to PEFT
+- build_optimizer_for_sparse: for slat_flow_model (Sparse Stage 2) Build optimizer
+- build_optimizer_for_dense: for sparse_structure_flow_model (Dense Stage 1) Build optimizer
+- set_slat_trainable: settings slat_flow_model Be trainable (freeze other models)
+- inject_lora_to_slat: towards slat_flow_model Inject LoRA layer
+- TrellisFullFinetuneStrategy: Trellis Full parameter fine-tuning strategy
+- TrellisLoRAStrategy: Trellis LoRA fine-tuning strategy
+- TrellisFrozenStrategy: Trellis Freeze Strategy (Inference Mode)
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ import torch.optim as optim
 class SparseLinearLora(nn.Module, LoraLayer):
     """LoRA for TRELLIS SparseLinear.
 
-    注意：forward 接收 SparseTensor，内部仅对 feats 施加 LoRA，再 replace 到 SparseTensor。
+    Note:forward receive SparseTensor, internally only for feats impose LoRA, again replace Arrive SparseTensor.
     """
 
     def __init__(
@@ -64,14 +64,14 @@ class SparseLinearLora(nn.Module, LoraLayer):
         )
 
     def forward(self, x: sp.SparseTensor, *args: Any, **kwargs: Any) -> sp.SparseTensor:
-        # 基线输出（保持 SparseTensor 结构）
+        # Baseline output (hold SparseTensor structure)
         if self.disable_adapters or self.merged:
             return self.get_base_layer()(x, *args, **kwargs)
 
         out: sp.SparseTensor = self.get_base_layer()(x, *args, **kwargs)  # SparseTensor feats shape (N, Cout)
         out_dtype = out.feats.dtype
 
-        # 逐 adapter 叠加 LoRA 贡献，仅作用于 feats
+        # chase adapter Overlay LoRA Contribution, only affects feats
         for active_adapter in self.active_adapters:
             if active_adapter not in self.lora_A.keys():
                 continue
@@ -87,7 +87,7 @@ class SparseLinearLora(nn.Module, LoraLayer):
 
         return out
 
-    # 合并/拆分逻辑：直接对基线 nn.Linear 权重做增量，与 peft Linear 一致
+    # merge/Split Logic: Directly to Baseline nn.Linear The weight is incremented, and peft Linear consistent
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         adapter_names = list(self.active_adapters) if adapter_names is None else adapter_names
         if not adapter_names:
@@ -116,7 +116,7 @@ class SparseLinearLora(nn.Module, LoraLayer):
 
 
 def register_sparse_linear_with_peft() -> None:
-    """将 SparseLinear 的 LoRA 注入注册到 PEFT 的 dispatch 函数中。"""
+    """will SparseLinear of LoRA Injection registration into PEFT of dispatch in function."""
     from peft.tuners.lora import layer as lora_layer_mod
 
     orig_dispatch = lora_layer_mod.dispatch_default
@@ -149,12 +149,12 @@ def _build_optimizer(
     trainable_params: list,
     opt_cfg: Any,
 ) -> Optional[optim.Optimizer]:
-    """根据配置构建优化器（内部通用实现）。"""
+    """Build the optimizer according to the configuration (internal generic implementation)."""
     if not trainable_params:
         return None
 
     opt_type = str(opt_cfg.type).lower()
-    
+
     if opt_type == 'adam_8bit':
         import bitsandbytes as bnb
         return bnb.optim.AdamW8bit(
@@ -164,7 +164,7 @@ def _build_optimizer(
             eps=float(opt_cfg.eps),
             weight_decay=float(opt_cfg.weight_decay),
         )
-    
+
     from timm.optim.optim_factory import create_optimizer_v2
 
     if opt_type == "sgd":
@@ -187,14 +187,14 @@ def build_optimizer_for_sparse(
     slat_model: nn.Module,
     opt_cfg: Any,
 ) -> Optional[optim.Optimizer]:
-    """为 slat_flow_model (Sparse Stage 2) 构建 optimizer。
+    """for slat_flow_model (Sparse Stage 2) build optimizer.
 
     Args:
-        slat_model: 可训练的 SLatFlowModel
-        opt_cfg: 优化器配置（需含 type/lr/eps/weight_decay 等）
+        slat_model: trainable SLatFlowModel
+        opt_cfg: Optimizer configuration (required type/lr/eps/weight_decay etc.)
 
     Returns:
-        Optimizer 或 None（无可训练参数时）
+        Optimizer or None(When there are no training parameters)
     """
     trainable_params = [p for p in slat_model.parameters() if p.requires_grad]
     return _build_optimizer(trainable_params, opt_cfg)
@@ -204,78 +204,78 @@ def build_optimizer_for_dense(
     ss_model: nn.Module,
     opt_cfg: Any,
 ) -> Optional[optim.Optimizer]:
-    """为 sparse_structure_flow_model (Dense Stage 1) 构建 optimizer。
+    """for sparse_structure_flow_model (Dense Stage 1) build optimizer.
 
     Args:
-        ss_model: 可训练的 sparse_structure_flow_model
-        opt_cfg: 优化器配置（需含 type/lr/eps/weight_decay 等）
+        ss_model: trainable sparse_structure_flow_model
+        opt_cfg: Optimizer configuration (required type/lr/eps/weight_decay etc.)
 
     Returns:
-        Optimizer 或 None（无可训练参数时）
+        Optimizer or None(When there are no training parameters)
     """
     trainable_params = [p for p in ss_model.parameters() if p.requires_grad]
     return _build_optimizer(trainable_params, opt_cfg)
 
 
 # =====================================================================
-# 模型可训练设置
+# Model trainable settings
 # =====================================================================
 
 def set_slat_trainable(pipeline: Any, trainable: bool = True) -> None:
     """
-    设置 slat_flow_model 的可训练状态。
-    
+    settings slat_flow_model trainable status.
+
     Args:
-        pipeline: TrellisRefAdapter 实例
-        trainable: True 解冻，False 冻结
+        pipeline: TrellisRefAdapter Example
+        trainable: True Thaw,False Freeze
     """
     slat_model = pipeline.pipe.models["slat_flow_model"]
     for p in slat_model.parameters():
         p.requires_grad = trainable
-    
-    status = "可训练" if trainable else "冻结"
+
+    status = "trainable" if trainable else "Freeze"
     n_params = sum(p.numel() for p in slat_model.parameters())
-    print(f"[set_slat_trainable] slat_flow_model {status} ({n_params:,} 参数)")
+    print(f"[set_slat_trainable] slat_flow_model {status} ({n_params:,} parameters)")
 
 
 def inject_lora_to_slat(pipeline: Any, lora_cfg: Any) -> None:
     """
-    向 slat_flow_model 注入 LoRA 层。
-    
-    注意：调用前需先调用 register_sparse_linear_with_peft()。
-    
+    towards slat_flow_model Inject LoRA layer.
+
+    Note: You need to call before calling register_sparse_linear_with_peft().
+
     Args:
-        pipeline: TrellisRefAdapter 实例
-        lora_cfg: LoRA 配置，需含以下字段:
-            - lora_rank: LoRA 秩
+        pipeline: TrellisRefAdapter Example
+        lora_cfg: LoRA Configuration, must contain the following fields:
+            - lora_rank: LoRA rank
             - lora_alpha: LoRA alpha
-            - target_modules: 目标模块列表（如 ["to_q", "to_v"]）
-            - lora_dropout: dropout 比例（可选，默认 0.0）
+            - target_modules: A list of target modules (e.g. ["to_q", "to_v"])
+            - lora_dropout: dropout scale (optional, default 0.0)
     """
     from peft import LoraConfig, get_peft_model
-    
+
     slat_model = pipeline.pipe.models["slat_flow_model"]
-    
-    # 构建 LoRA 配置
+
+    # build LoRA Configuration
     config = LoraConfig(
         r=int(lora_cfg.lora_rank),
         lora_alpha=int(lora_cfg.get("lora_alpha", lora_cfg.lora_rank)),
         target_modules=list(lora_cfg.target_modules),
         lora_dropout=float(lora_cfg.get("lora_dropout", 0.0)),
     )
-    
-    # 注入 LoRA
+
+    # Inject LoRA
     slat_model_lora = get_peft_model(slat_model, config)
     pipeline.pipe.models["slat_flow_model"] = slat_model_lora
-    
-    # 统计参数
+
+    # Statistical parameters
     trainable = sum(p.numel() for p in slat_model_lora.parameters() if p.requires_grad)
     total = sum(p.numel() for p in slat_model_lora.parameters())
-    print(f"[inject_lora_to_slat] LoRA 注入完成: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
+    print(f"[inject_lora_to_slat] LoRA Injection completed: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
 
 # =====================================================================
-# Trellis 训练策略（全参 / LoRA / 冻结）
+# Trellis Training strategy (all parameters / LoRA / frozen)
 # =====================================================================
 
 from oreo.systems.utils.strategy import TrainingStrategy, SpconvInferenceMixin
@@ -283,58 +283,58 @@ from oreo.systems.utils.strategy import TrainingStrategy, SpconvInferenceMixin
 
 class TrellisFullFinetuneStrategy(SpconvInferenceMixin, TrainingStrategy):
     """
-    Trellis 全参微调策略。
-    
-    - 解冻所有参数
-    - 从预训练权重加载冻结教师
-    - ⚠️ 强制同设备：spconv 不支持跨设备推理，教师和学生必须在同一 GPU
+    Trellis Full parameter fine-tuning strategy.
+
+    - Unfreeze all parameters
+    - Loading frozen teachers from pre-trained weights
+    - ⚠️ Force the same device:spconv Cross-device reasoning is not supported, teachers and students must be on the same GPU
     """
-    
+
     def __init__(
-        self, 
-        pipeline: Any, 
-        train_device: torch.device, 
-        teacher_device: torch.device,  # 忽略，强制同设备
+        self,
+        pipeline: Any,
+        train_device: torch.device,
+        teacher_device: torch.device,  # Ignore, force the same device
         pretrained_path: str,
     ):
-        # ★ 强制同设备，避免 spconv 跨设备 indice_key 缓存问题
+        # ★ Force the same equipment to avoid spconv Across devices indice_key caching problem
         super().__init__(pipeline, train_device, train_device)
         self._sparse_teacher: Optional[nn.Module] = None
         self._dense_teacher: Optional[nn.Module] = None
         self._pretrained_path = pretrained_path
-    
+
     def setup(self) -> None:
-        """全参设置：解冻学生，从预训练加载教师（同设备）。"""
+        """Full parameter settings: Unfreeze students and load teachers from pre-training (same device)."""
         from trellis import models as trellis_models
-        
-        # 解冻学生
+
+        # Unfreeze students
         for p in self._student.parameters():
             p.requires_grad = True
-        
-        # 加载 Sparse 教师到同一设备（spconv 不支持跨设备）
+
+        # Load Sparse Teacher to the same device (spconv Cross-device support is not supported)
         model_args = self.pipeline.pipe._pretrained_args['models']
         slat_model_path = f"{self._pretrained_path}/{model_args['slat_flow_model']}"
         self._sparse_teacher = trellis_models.from_pretrained(slat_model_path)
         self._sparse_teacher.to(self.teacher_device).eval().requires_grad_(False)
-        
+
         slat_mem = sum(p.numel() * p.element_size() for p in self._sparse_teacher.parameters()) / 1e6
         trainable = sum(p.numel() for p in self._student.parameters() if p.requires_grad)
-        
-        # 加载 Dense 教师（sparse_structure_flow_model，用于 on-policy dense rollout fallback）
+
+        # Load Dense Teacher (sparse_structure_flow_model, used for on-policy dense rollout fallback)
         ss_model_path = f"{self._pretrained_path}/{model_args['sparse_structure_flow_model']}"
         self._dense_teacher = trellis_models.from_pretrained(ss_model_path)
         self._dense_teacher.to(self.train_device).eval().requires_grad_(False)
-        
+
         ss_mem = sum(p.numel() * p.element_size() for p in self._dense_teacher.parameters()) / 1e6
-        
-        print(f"[TrellisFullFinetuneStrategy] 全参微调: {trainable:,} 参数可训练")
-        print(f"[TrellisFullFinetuneStrategy] Sparse 教师 → {self.teacher_device} ({slat_mem:.0f} MB)")
-        print(f"[TrellisFullFinetuneStrategy] Dense 教师  → {self.train_device} ({ss_mem:.0f} MB)")
-        print(f"[TrellisFullFinetuneStrategy] ⚠️ 显存翻倍（spconv 不支持跨设备推理）")
-    
+
+        print(f"[TrellisFullFinetuneStrategy] Full parameter fine-tuning: {trainable:,} Parameters are trainable")
+        print(f"[TrellisFullFinetuneStrategy] Sparse teacher → {self.teacher_device} ({slat_mem:.0f} MB)")
+        print(f"[TrellisFullFinetuneStrategy] Dense teacher  → {self.train_device} ({ss_mem:.0f} MB)")
+        print(f"[TrellisFullFinetuneStrategy] ⚠️ Double the memory (spconv Cross-device inference is not supported)")
+
     @contextmanager
     def sparse_teacher_context(self) -> Generator[None, None, None]:
-        """临时替换 pipeline 中的 sparse 模型为冻结教师。"""
+        """temporary replacement pipeline in sparse The model is a frozen teacher."""
         original = self.pipeline.pipe.models["slat_flow_model"]
         self.pipeline.pipe.models["slat_flow_model"] = self._sparse_teacher
         try:
@@ -344,7 +344,7 @@ class TrellisFullFinetuneStrategy(SpconvInferenceMixin, TrainingStrategy):
 
     @contextmanager
     def dense_teacher_context(self) -> Generator[None, None, None]:
-        """临时替换 pipeline 中的 dense 模型为冻结教师。"""
+        """temporary replacement pipeline in dense The model is a frozen teacher."""
         original = self.pipeline.pipe.models["sparse_structure_flow_model"]
         self.pipeline.pipe.models["sparse_structure_flow_model"] = self._dense_teacher
         try:
@@ -354,12 +354,12 @@ class TrellisFullFinetuneStrategy(SpconvInferenceMixin, TrainingStrategy):
 
 
 class TrellisLoRAStrategy(SpconvInferenceMixin, TrainingStrategy):
-    """Trellis LoRA 微调：冻结基础权重，只训练 LoRA 参数。"""
+    """Trellis LoRA Fine-tuning: Freeze base weights and only train LoRA parameters."""
 
     def setup(self) -> None:
         trainable = sum(p.numel() for p in self._student.parameters() if p.requires_grad)
         total = sum(p.numel() for p in self._student.parameters())
-        logging.info(f"[TrellisLoRAStrategy] 可训练 {trainable:,} / 总参数 {total:,} ({100*trainable/total:.2f}%)")
+        logging.info(f"[TrellisLoRAStrategy] trainable {trainable:,} / Total parameters {total:,} ({100*trainable/total:.2f}%)")
 
     @contextmanager
     def sparse_teacher_context(self) -> Generator[None, None, None]:
@@ -367,20 +367,20 @@ class TrellisLoRAStrategy(SpconvInferenceMixin, TrainingStrategy):
             yield
 
     def save_student(self, ckpt_dir: Path) -> None:
-        """只保存 LoRA adapter 参数。"""
+        """save only LoRA adapter parameters."""
         from safetensors.torch import save_file
         lora_sd = {k: v for k, v in self._unwrap().state_dict().items() if "lora_" in k}
         save_file(lora_sd, str(ckpt_dir / "slat_flow_model.safetensors"))
 
     def load_student(self, ckpt_dir: Path) -> None:
-        """只加载 LoRA adapter 参数（strict=False）。"""
+        """load only LoRA adapter Parameters (strict=False)."""
         p = ckpt_dir / "slat_flow_model.safetensors"
         if p.exists():
             from safetensors.torch import load_file
             self._unwrap().load_state_dict(load_file(str(p), device="cpu"), strict=False)
 
     def export_student(self, ckpt_dir: Path, export_dir: Path) -> Dict[str, Path]:
-        """LoRA 导出：先加载 adapter，merge 到 base，导出完整权重。"""
+        """LoRA Export: load first adapter,merge Arrive base, export the complete weights."""
         from safetensors.torch import save_file
 
         export_dir.mkdir(parents=True, exist_ok=True)
@@ -392,7 +392,7 @@ class TrellisLoRAStrategy(SpconvInferenceMixin, TrainingStrategy):
         return {"slat_flow_model": dst}
 
     def _merge_lora_weights(self) -> Dict[str, torch.Tensor]:
-        """将 lora_A/lora_B 折叠进 base weight，返回无 LoRA key 的干净 state_dict。"""
+        """will lora_A/lora_B fold in base weight, returns None LoRA key clean state_dict."""
         model = self._unwrap()
         merged: Dict[str, torch.Tensor] = {}
 
@@ -414,21 +414,21 @@ class TrellisLoRAStrategy(SpconvInferenceMixin, TrainingStrategy):
 
 
 class TrellisFrozenStrategy(TrainingStrategy):
-    """Trellis 冻结策略（推理模式）。不需要 SpconvInferenceMixin。"""
+    """Trellis Freeze strategy (inference mode). No need SpconvInferenceMixin."""
 
     def setup(self) -> None:
         for p in self._student.parameters():
             p.requires_grad = False
-        logging.info("[TrellisFrozenStrategy] 模型冻结（推理模式）")
+        logging.info("[TrellisFrozenStrategy] Model freeze (inference mode)")
 
     @contextmanager
     def sparse_teacher_context(self) -> Generator[None, None, None]:
-        raise RuntimeError("TrellisFrozenStrategy 不支持正则化")
+        raise RuntimeError("TrellisFrozenStrategy Regularization is not supported")
         yield  # type hint
 
     @contextmanager
     def dense_teacher_context(self) -> Generator[None, None, None]:
-        raise RuntimeError("TrellisFrozenStrategy 不支持 dense teacher")
+        raise RuntimeError("TrellisFrozenStrategy Not supported dense teacher")
         yield  # type hint
 
     @property
@@ -436,7 +436,7 @@ class TrellisFrozenStrategy(TrainingStrategy):
         return False
 
     def prepare_sparse(self, accelerator, optimizer_sparse):
-        """冻结模式无需 DDP 包装。"""
+        """No need for freeze mode DDP packaging."""
         self._accelerator = accelerator
         return optimizer_sparse
 

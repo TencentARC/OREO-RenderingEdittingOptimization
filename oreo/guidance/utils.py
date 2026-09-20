@@ -1,7 +1,7 @@
 """
-Guidance 工具函数。
+Guidance Tool functions.
 
-提供图像格式转换等通用工具。
+Provides general tools such as image format conversion.
 """
 
 import base64
@@ -14,13 +14,13 @@ from PIL import Image
 
 def tensor_to_base64(tensor: torch.Tensor) -> str:
     """
-    将 (C,H,W) Tensor 转换为 Base64 字符串 (PNG 格式)。
-    
+    will (C,H,W) Tensor Convert to Base64 string (PNG Format).
+
     Args:
-        tensor: 图像张量 (C,H,W)，float32 [0,1]
-    
+        tensor: image tensor (C,H,W),float32 [0,1]
+
     Returns:
-        str: Base64 编码的 PNG 图像
+        str: Base64 coded PNG image
     """
     img_np = (tensor.detach().cpu().permute(1, 2, 0).numpy() * 255).clip(0, 255).astype(np.uint8)  # (H,W,C)
     if img_np.shape[-1] == 1:
@@ -33,14 +33,14 @@ def tensor_to_base64(tensor: torch.Tensor) -> str:
 
 def base64_to_tensor(b64_str: str, device: torch.device) -> torch.Tensor:
     """
-    将 Base64 字符串转换为 (C,H,W) Tensor (float32 [0,1])。
-    
+    will Base64 String converted to (C,H,W) Tensor (float32 [0,1]).
+
     Args:
-        b64_str: Base64 编码的图像
-        device: 目标设备
-    
+        b64_str: Base64 encoded image
+        device: target device
+
     Returns:
-        torch.Tensor: 图像张量 (C,H,W)
+        torch.Tensor: image tensor (C,H,W)
     """
     img_data = base64.b64decode(b64_str)
     img = Image.open(BytesIO(img_data)).convert("RGB")
@@ -51,17 +51,17 @@ def base64_to_tensor(b64_str: str, device: torch.device) -> torch.Tensor:
 
 def pil_to_base64(img: Image.Image, size: tuple = None) -> str:
     """
-    将 PIL.Image 转换为 Base64 字符串 (PNG 格式)。
-    
+    will PIL.Image Convert to Base64 string (PNG Format).
+
     Args:
-        img: PIL 图像
-        size: 可选的目标尺寸 (H, W)，如果指定则先 resize
-    
+        img: PIL image
+        size: Optional target size (H, W), if specified, first resize
+
     Returns:
-        str: Base64 编码的 PNG 图像
+        str: Base64 coded PNG image
     """
     if size is not None:
-        # PIL resize 参数是 (W, H)，而 size 是 (H, W)
+        # PIL resize The parameters are (W, H), while size Yes (H, W)
         img = img.resize((size[1], size[0]), Image.Resampling.LANCZOS)
     buffer = BytesIO()
     img.save(buffer, format="PNG")
@@ -70,16 +70,16 @@ def pil_to_base64(img: Image.Image, size: tuple = None) -> str:
 
 def base64_to_grad_tensor(b64_str: str, device: torch.device) -> torch.Tensor:
     """
-    将 Base64 编码的 numpy 数组解码为梯度张量。
-    
-    服务端使用 np.save 保存梯度，格式为 float32。
-    
+    will Base64 coded numpy Array decoded into gradient tensor.
+
+    Server use np.save Save the gradient in the format float32.
+
     Args:
-        b64_str: Base64 编码的 numpy 字节
-        device: 目标设备
-    
+        b64_str: Base64 coded numpy Bytes
+        device: target device
+
     Returns:
-        torch.Tensor: 梯度张量 (C,H,W)
+        torch.Tensor: gradient tensor (C,H,W)
     """
     buffer = BytesIO(base64.b64decode(b64_str))
     arr = np.load(buffer)  # (C,H,W) float32

@@ -8,7 +8,7 @@ def _normalize_fovy_to_batch(
     dtype: torch.dtype,
     device: torch.device,
 ) -> torch.Tensor:
-    # 将 fovy 统一为 [B]
+    # will fovy unified as [B]
     if not torch.is_tensor(fovy_deg):
         fovy_t = torch.full((batch_size,), float(fovy_deg), dtype=dtype, device=device)  # [B]
     else:
@@ -28,16 +28,16 @@ def build_perspective_matrix(
     device: torch.device,
     batch_size: int,
 ) -> torch.Tensor:
-    """构造批量透视投影矩阵。
+    """Constructs a batch perspective projection matrix.
 
-    参数:
+    parameters:
     - fovy_deg: [] | [B]
-    - aspect: 标量宽高比
-    - znear, zfar: 标量近远裁剪面
-    - dtype, device: 张量类型与设备
-    - batch_size: 期望批量大小（用于将标量 fovy 扩展为 [B]）
+    - aspect: Scalar aspect ratio
+    - znear, zfar: Scalar near and far clipping planes
+    - dtype, device: Tensor types and devices
+    - batch_size: expected batch size (used to convert scalar fovy expanded to [B])
 
-    返回:
+    Return:
     - proj: [B,4,4]
     """
     fovy_t = _normalize_fovy_to_batch(fovy_deg, batch_size, dtype, device)  # [B]
@@ -49,7 +49,7 @@ def build_perspective_matrix(
 
     proj = torch.zeros((batch_size, 4, 4), dtype=dtype, device=device)  # [B,4,4]
     proj[:, 0, 0] = f / A  # [B]
-    # 与 nvdiffrast 约定对齐：Y 轴取负，避免渲染结果上下颠倒
+    # with nvdiffrast Agreed alignment:Y The axis is negative to prevent the rendering result from being upside down.
     proj[:, 1, 1] = -f  # [B]
     proj[:, 2, 2] = (zf + zn) / (zn - zf)  # [B]
     proj[:, 2, 3] = (2.0 * zf * zn) / (zn - zf)  # [B]
@@ -61,14 +61,14 @@ def build_mvp_from_w2c(
     w2c: torch.Tensor,
     proj: torch.Tensor,
 ) -> torch.Tensor:
-    """根据 w2c 与投影矩阵构造 MVP。
+    """According to w2c Constructed with projection matrix MVP.
 
-    支持两种 w2c 形状：
+    Support two w2c Shape:
     - [B,4,4]
     - [B,V,4,4]
 
-    要求 proj 形状为 [B,4,4]。
-    返回与 w2c 同维度的 mvp。
+    request proj The shape is [B,4,4].
+    Return with w2c same dimension mvp.
     """
     if w2c.dim() == 3:
         mvp = torch.matmul(proj, w2c)  # [B,4,4]
@@ -80,9 +80,9 @@ def build_mvp_from_w2c(
 
 
 def build_w2c_from_c2w(c2w: torch.Tensor) -> torch.Tensor:
-    """从 c2w 计算 w2c，支持 [B,4,4] 或 [B,V,4,4]。
+    """from c2w Calculate w2c, support [B,4,4] or [B,V,4,4].
 
-    注意：不假设严格正交，直接使用矩阵逆。
+    Note: Do not assume strict orthogonality, use matrix inversion directly.
     """
     if c2w.dim() == 3:
         w2c = torch.inverse(c2w)  # [B,4,4]

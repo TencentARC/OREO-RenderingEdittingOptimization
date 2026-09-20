@@ -2,12 +2,12 @@
 oreo.systems.base
 =======================
 
-训练系统的通用基类与占位符。
-提取多种模型训练代码的共性，供不同模型后端继承/扩展。
+Common base classes and placeholders for training systems.
+Extract common features of multiple model training codes for inheritance by different model backends/Extension.
 """
 
 # =====================================================================
-# 标准库导入
+# Standard library import
 # =====================================================================
 import argparse
 import csv
@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List, ClassVar
 
 # =====================================================================
-# 第三方库导入
+# Third-party library import
 # =====================================================================
 import numpy as np
 import yaml
@@ -32,105 +32,105 @@ from torch.cuda.amp import custom_bwd, custom_fwd
 
 
 # =====================================================================
-# 设备分配工具 - 训练与 Guidance 的 GPU 映射
+# Device allocation tool - training and Guidance of GPU mapping
 # =====================================================================
 
 def compute_guidance_device(train_device: torch.device) -> torch.device:
     """
-    根据训练设备计算 Guidance 模型设备。
-    
-    策略：每个节点内，前 N 张 GPU 给训练，后 N 张 GPU 给 Guidance。
-    当 GPU 数量不足时（如全部用于训练），自动回退到与训练共享同一设备。
-    
-    - 独立模式: train=cuda:0-3, guidance=cuda:4-7（需 2N 张卡）
-    - 共享模式（自动回退）: train=cuda:0-3, guidance=cuda:0-3（N 张卡即可）
-      适用于三阶段 Autograd 版，Phase 2 显存峰值 = max(guidance, decode_render)
-    
-    公式: guidance_device = LOCAL_WORLD_SIZE + LOCAL_RANK
-    
-    环境变量说明：
-    - LOCAL_WORLD_SIZE: 当前节点的进程数（即节点内训练使用的 GPU 数）
-    - LOCAL_RANK: 当前进程在节点内的排名
-    - WORLD_SIZE: 全局进程总数（多机时 = 节点数 * 每节点进程数）
-    
+    Calculated based on training equipment Guidance Model equipment.
+
+    Strategy: Within each node, before N Zhang GPU Give training, after N Zhang GPU give Guidance.
+    When GPU When the number is insufficient (such as all used for training), it will automatically fall back to sharing the same device with training.
+
+    - Standalone mode: train=cuda:0-3, guidance=cuda:4-7(Required 2N card)
+    - Shared mode (automatic fallback): train=cuda:0-3, guidance=cuda:0-3(N Just get a card)
+      Suitable for three stages Autograd version,Phase 2 Memory peak = max(guidance, decode_render)
+
+    formula: guidance_device = LOCAL_WORLD_SIZE + LOCAL_RANK
+
+    Environment variable description:
+    - LOCAL_WORLD_SIZE: The number of processes on the current node (that is, the number of processes used for training within the node GPU number)
+    - LOCAL_RANK: The ranking of the current process within the node
+    - WORLD_SIZE: Total number of global processes (multi-machine time = Number of nodes * number of processes per node)
+
     Args:
-        train_device: 训练使用的设备（用于类型检查和回退）
-    
+        train_device: Equipment used for training (for type checking and fallback)
+
     Returns:
-        torch.device: Guidance 模型设备
-    
+        torch.device: Guidance model equipment
+
     Raises:
-        ValueError: 如果训练设备不是 CUDA
-    
+        ValueError: If the training device is not CUDA
+
     Example:
-        >>> # 独立模式：LOCAL_WORLD_SIZE=4, LOCAL_RANK=1, 8 GPU
+        >>> # Standalone mode:LOCAL_WORLD_SIZE=4, LOCAL_RANK=1, 8 GPU
         >>> guidance_device = compute_guidance_device(torch.device("cuda:1"))
         >>> print(guidance_device)  # cuda:5
-        
-        >>> # 共享模式（自动回退）：LOCAL_WORLD_SIZE=4, LOCAL_RANK=1, 4 GPU
+
+        >>> # Shared mode (automatic fallback):LOCAL_WORLD_SIZE=4, LOCAL_RANK=1, 4 GPU
         >>> guidance_device = compute_guidance_device(torch.device("cuda:1"))
-        >>> print(guidance_device)  # cuda:1（回退到训练设备）
+        >>> print(guidance_device)  # cuda:1(fallback to training device)
     """
     if train_device.type != "cuda":
-        raise ValueError(f"训练设备必须是 CUDA，当前: {train_device}")
-    
-    # ---- 获取节点内进程数 ----
-    # 优先使用 LOCAL_WORLD_SIZE（torchrun/accelerate launch 会设置）
-    # 备选方案：WORLD_SIZE / NNODES 或单机回退到 WORLD_SIZE
+        raise ValueError(f"Training equipment must be CUDA, currently: {train_device}")
+
+    # ---- Get the number of processes in a node ----
+    # priority use LOCAL_WORLD_SIZE(torchrun/accelerate launch will be set)
+    # Alternatives:WORLD_SIZE / NNODES Or fall back to the WORLD_SIZE
     local_world_size = os.environ.get("LOCAL_WORLD_SIZE")
-    
+
     if local_world_size is not None:
         n_train_gpus = int(local_world_size)
     else:
-        # 回退方案：假设单机，或根据 NNODES 计算
+        # Fallback plan: Assume a single machine, or based on NNODES Calculate
         world_size = int(os.environ.get("WORLD_SIZE", 1))
         nnodes = int(os.environ.get("NNODES", 1))
         n_train_gpus = world_size // nnodes
-    
+
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    
-    # Guidance 设备 = 节点内训练GPU数 + LOCAL_RANK
+
+    # Guidance Equipment = In-node trainingGPUnumber + LOCAL_RANK
     guidance_idx = n_train_gpus + local_rank
-    
-    # 检查设备是否存在；不足则回退到训练同设备
+
+    # Check whether the device exists; if insufficient, fall back to training with the same device
     n_gpus = torch.cuda.device_count()
     if guidance_idx >= n_gpus:
         logging.warning(
-            f"Guidance 需要 cuda:{guidance_idx}，但本节点只有 {n_gpus} 个 GPU。"
-            f"回退到训练设备 {train_device}（共享模式）。"
+            f"Guidance need cuda:{guidance_idx}, but this node only has {n_gpus} a GPU."
+            f"Fallback to training device {train_device}(shared mode)."
         )
         return train_device
-    
+
     return torch.device(f"cuda:{guidance_idx}")
 
 
 # =====================================================================
-# 工具函数 - CFG 混合
+# Utility function - CFG mix
 # =====================================================================
 
 def mix_cfg(
-    cond_pred: torch.Tensor, 
-    uncond_pred: torch.Tensor, 
-    scale: float, 
+    cond_pred: torch.Tensor,
+    uncond_pred: torch.Tensor,
+    scale: float,
     uncond_mode: str = "detach"
 ) -> torch.Tensor:
     """
-    Classifier-Free Guidance (CFG) 混合函数。
-    
-    CFG 是一种在扩散模型中增强条件生成质量的技术。
-    公式: output = cond_pred + scale * (cond_pred - uncond_pred)
-    
+    Classifier-Free Guidance (CFG) Mixed functions.
+
+    CFG Is a technique that enhances the quality of condition generation in diffusion models.
+    formula: output = cond_pred + scale * (cond_pred - uncond_pred)
+
     Args:
-        cond_pred: 条件预测结果，形状 (B,T,C) 或 (N,C)
-        uncond_pred: 无条件预测结果，形状与 cond_pred 相同，可为 None
-        scale: CFG 缩放因子，通常 > 1.0 以增强条件效果
-        uncond_mode: 梯度处理模式
-            - "detach": 对 uncond_pred 断开梯度（默认）
-            - "mirror": 对 cond_pred 断开梯度
-            - "none": 保持两者梯度
+        cond_pred: Conditional prediction results, shape (B,T,C) or (N,C)
+        uncond_pred: Unconditional prediction results, shape and cond_pred Same, can be None
+        scale: CFG scaling factor, usually > 1.0 to enhance the conditional effect
+        uncond_mode: Gradient processing mode
+            - "detach": Yes uncond_pred Disconnect gradient (default)
+            - "mirror": Yes cond_pred disconnect gradient
+            - "none": Keep the gradient of both
 
     Returns:
-        混合后的预测结果，形状与输入相同
+        The mixed prediction result has the same shape as the input
     """
     if uncond_pred is None:
         return cond_pred  # (B,T,C)
@@ -142,64 +142,64 @@ def mix_cfg(
 
 
 # =====================================================================
-# ModeGuard - 模块模式上下文管理器
+# ModeGuard - Module mode context manager
 # =====================================================================
 
 class ModeGuard:
     """
-    模块模式上下文管理器。
-    
-    用于临时将模块切换到指定模式（train 或 eval），并在退出时恢复原状态。
-    支持同时管理多个模块，确保 BatchNorm、Dropout 等层在不同模式下行为正确。
-    
+    Module mode context manager.
+
+    Used to temporarily switch the module to the specified mode (train or eval), and restore the original state when exiting.
+    Supports simultaneous management of multiple modules to ensure BatchNorm,Dropout etc. Layers behave correctly in different modes.
+
     Usage:
         with ModeGuard(model1, model2, training=True):
-            output = model1(input)  # train 模式
-        # 退出后自动恢复原来的 training 状态
+            output = model1(input)  # train mode
+        # Automatically restore the original after exiting training Status
     """
 
     def __init__(self, *modules: Any, training: bool = False):
         """
         Args:
-            *modules: 要管理的 nn.Module 实例（自动过滤 None）
-            training: 目标模式，True 为训练模式，False 为评估模式
+            *modules: To be managed nn.Module Example (automatic filtering None)
+            training: target mode,True For training mode,False for evaluation mode
         """
         self.modules = [m for m in modules if m is not None]
         self.training = training
         self.states: List[bool] = []
 
     def __enter__(self):
-        """进入上下文：保存状态并切换到目标模式。"""
+        """Enter context: Save state and switch to target mode."""
         self.states = [m.training for m in self.modules]
         for module in self.modules:
             module.train(self.training)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """退出上下文：恢复原始训练状态。"""
+        """Exit context: restore original training state."""
         for module, was_training in zip(self.modules, self.states):
             module.train(was_training)
 
 
 def TrainModeGuard(*modules: Any) -> ModeGuard:
-    """训练模式守卫。等价于 ModeGuard(..., training=True)。"""
+    """Training mode guard. Equivalent to ModeGuard(..., training=True)."""
     return ModeGuard(*modules, training=True)
 
 
 def EvalModeGuard(*modules: Any) -> ModeGuard:
-    """评估模式守卫。等价于 ModeGuard(..., training=False)。"""
+    """Evaluation mode guard. Equivalent to ModeGuard(..., training=False)."""
     return ModeGuard(*modules, training=False)
 
 
 # =====================================================================
-# BaseConfig - 配置基类
+# BaseConfig - Configure base class
 # =====================================================================
 
 @dataclass
 class BaseConfig:
     """
-    训练配置基类，包含所有模型通用的配置字段。
-    子类（如 TrellisConfig）可继承并添加模型特定字段。
+    Training configuration base class, containing common configuration fields for all models.
+    subcategories (e.g. TrellisConfig) can inherit and add model specific fields.
     """
     config_path: Optional[str] = None
     run_name: str = "run"
@@ -212,8 +212,8 @@ class BaseConfig:
     mixed_precision: str = "fp16"
     gradient_accumulation_steps: int = 1
     checkpoint: Optional[str] = None
-    
-    # 子配置字典（子类可覆盖具体结构）
+
+    # Subconfiguration dictionary (subclasses can cover specific structures)
     train: Dict[str, Any] = field(default_factory=dict)
     camera: Dict[str, Any] = field(default_factory=dict)
     renderer: Dict[str, Any] = field(default_factory=dict)
@@ -221,7 +221,7 @@ class BaseConfig:
     freq: Dict[str, Any] = field(default_factory=dict)
 
     def save_yaml(self, path: str) -> None:
-        """将当前配置保存为 YAML。"""
+        """Save current configuration as YAML."""
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         data = asdict(self)
@@ -230,127 +230,127 @@ class BaseConfig:
 
     @classmethod
     def load_from_file(cls, path: Optional[str], overrides: Optional[Dict[str, Any]] = None) -> "BaseConfig":
-        """从文件构造配置（子类需实现具体逻辑）。"""
-        raise NotImplementedError("load_from_file 需由子类实现。")
+        """Construct configuration from file (subclasses need to implement specific logic)."""
+        raise NotImplementedError("load_from_file Need to be implemented by subclasses.")
 
 
 # =====================================================================
-# BaseState - 状态基类
+# BaseState - State base class
 # =====================================================================
 
 @dataclass
 class BaseState:
     """
-    生成过程的状态容器基类。
-    
-    存储整个生成流程中的所有中间状态，包括：
-    - 稀疏结构坐标和特征
-    - 相机参数（用于渲染）
-    - 条件视角（含图像、路径、嵌入）
-    - 生成/编辑的视角缓存
-    
-    子类可根据具体模型扩展字段。
+    State container base class for the build process.
+
+    Stores all intermediate states in the entire generation process, including:
+    - Sparse structure coordinates and features
+    - Camera parameters (for rendering)
+    - Conditional perspective (including image, path, embedding)
+    - generate/Editor's perspective cache
+
+    Subclasses can extend fields based on a specific model.
     """
 
     @dataclass
     class Cameras:
-        """相机参数容器。"""
+        """Camera parameter container."""
         c2w: Any = None         # (B,V,4,4) camera-to-world
         w2c: Any = None         # (B,V,4,4) world-to-camera
-        mvp: Any = None         # (B,V,4,4) MVP 矩阵
-        positions: Any = None   # (B,V,3) 相机位置
-        intrinsics: Any = None  # (B,V,3,3) 内参矩阵
-        light_positions: Any = None  # (B,V,3) 光源位置
+        mvp: Any = None         # (B,V,4,4) MVP matrix
+        positions: Any = None   # (B,V,3) camera position
+        intrinsics: Any = None  # (B,V,3,3) Internal parameter matrix
+        light_positions: Any = None  # (B,V,3) light source position
 
     @dataclass
     class ViewsGenerated:
-        """生成视角缓存。存储从 3D 表示渲染出的多视角图像。"""
-        image_tensor: Any = None  # (B,V,H,W,C) 或 (B,V,C,H,W)
+        """Generate perspective cache. store from 3D Represents the rendered multi-view image."""
+        image_tensor: Any = None  # (B,V,H,W,C) or (B,V,C,H,W)
 
     @dataclass
     class ViewsEdited:
-        """编辑后视角缓存。存储经过编辑后的视角图像。"""
+        """View cache after editing. Store the edited perspective image."""
         image_tensor: Any = None      # (B,V,C,H,W)
-        trackers: Any = None          # List[StateTracker]，用于中间步可视化
+        trackers: Any = None          # List[StateTracker], used for intermediate step visualization
 
     @dataclass
     class ViewsConditioned:
-        """条件视角缓存。存储输入的条件图像及其嵌入。"""
+        """Conditional perspective caching. Stores the input conditional image and its embedding."""
         image_pils: Any = None   # list[len=B] of PIL.Image
         paths: Any = None        # list[len=B] of str
-        cond_embed: Any = None   # (B,S,C) 条件嵌入
-        uncond_embed: Any = None # (B,S,C) 无条件嵌入（用于 CFG）
+        cond_embed: Any = None   # (B,S,C) conditional embedding
+        uncond_embed: Any = None # (B,S,C) Unconditional embedding (for CFG)
 
     @dataclass
     class Guidance:
-        """Guidance 缓存。存储用于监督的指导信号。"""
+        """Guidance cache. Store guidance signals for supervision."""
 
-    # ============== 核心状态字段 ==============
-    coords: Any = None  # 稀疏结构坐标
-    feats: Any = None   # 稀疏特征
-    
-    # ============== 子状态容器 ==============
+    # ============== core status field ==============
+    coords: Any = None  # sparse structure coordinates
+    feats: Any = None   # sparse features
+
+    # ============== substate container ==============
     cameras: Cameras = field(default_factory=Cameras)
     views_generated: ViewsGenerated = field(default_factory=ViewsGenerated)
     views_edited: ViewsEdited = field(default_factory=ViewsEdited)
     views_conditioned: ViewsConditioned = field(default_factory=ViewsConditioned)
     guidance: Guidance = field(default_factory=Guidance)
-    
-    # ============== 数据挂载字段 ==============
+
+    # ============== Data mount field ==============
     guidances_data: Any = None
 
     def attach_batch(self, batch: Dict[str, Any]) -> "BaseState":
         """
-        从数据批次中提取并挂载条件、相机等信息。
-        子类应覆盖此方法以处理模型特定的 batch 结构。
+        Extract and mount conditions, cameras, and other information from data batches.
+        Subclasses should override this method to handle model-specific batch structure.
         """
-        raise NotImplementedError("attach_batch 需由子类实现。")
+        raise NotImplementedError("attach_batch Need to be implemented by subclasses.")
 
     def extract_embeddings(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        从 views_conditioned 中提取条件和无条件嵌入。
-        
+        from views_conditioned Extract conditional and unconditional embeddings.
+
         Returns:
             tuple: (cond_embed, uncond_embed)
         """
         cond = self.views_conditioned.cond_embed
         uncond = self.views_conditioned.uncond_embed
-        
+
         if cond is None:
-            raise ValueError("views_conditioned.cond_embed 为空，无法提取 embeddings。")
-        
-        # 处理 list 格式
+            raise ValueError("views_conditioned.cond_embed Empty and cannot be extracted embeddings.")
+
+        # Process list Format
         if isinstance(cond, list):
             cond = torch.cat(cond, dim=0)  # (B,S,C)
         if isinstance(uncond, list):
             uncond = torch.cat(uncond, dim=0)  # (B,S,C)
-        
-        # 处理多余维度
+
+        # Deal with redundant dimensions
         if isinstance(cond, torch.Tensor) and cond.dim() == 4 and cond.shape[1] == 1:
             cond = cond.squeeze(1)  # (B,S,C)
         if isinstance(uncond, torch.Tensor) and uncond.dim() == 4 and uncond.shape[1] == 1:
             uncond = uncond.squeeze(1)  # (B,S,C)
-        
+
         return cond, uncond
 
 
 
 # =====================================================================
-# 环境设置工具 - 独立函数（供所有系统使用）
+# Environment setup tool - Standalone function (for use by all systems)
 # =====================================================================
 
 def setup_env_and_seed(cfg: Any) -> None:
     """
-    设置随机种子与确定性运行环境。
+    Set random seeds and deterministic running environment.
 
-    确保实验可复现性，设置以下随机源的种子：
+    To ensure experiment reproducibility, set the following random source seeds:
     - Python random
     - NumPy random
     - PyTorch CPU/CUDA
-    - cuDNN 确定性模式
+    - cuDNN deterministic mode
 
     Args:
-        cfg: 配置对象，需包含 cfg.seed 字段
+        cfg: Configuration object, needs to contain cfg.seed Field
     """
     seed = int(cfg.seed)
     random.seed(seed)
@@ -362,21 +362,21 @@ def setup_env_and_seed(cfg: Any) -> None:
 
 
 # =====================================================================
-# 运行目录与 CSV 工具
+# Run directory with CSV Tools
 # =====================================================================
 
 class _TeeWriter:
-    """将输出同时写入原始流和日志文件的包装器"""
+    """A wrapper that writes output to both the original stream and the log file"""
     def __init__(self, original_stream, log_file_handle):
         self.original_stream = original_stream
         self.log_file_handle = log_file_handle
-    
+
     def write(self, message):
         self.original_stream.write(message)
         if self.log_file_handle and message.strip():
             self.log_file_handle.write(message)
             self.log_file_handle.flush()
-    
+
     def flush(self):
         self.original_stream.flush()
         if self.log_file_handle:
@@ -385,60 +385,60 @@ class _TeeWriter:
 
 def _setup_file_logging(log_file: Path, accelerator: Accelerator) -> None:
     """
-    初始化文件日志（每个 rank 各自一个日志文件）。
-    
-    日志同时输出到控制台和本地文件，便于训练过程追溯。
-    主进程额外将 stderr 重定向到日志文件，捕获未处理异常的 traceback。
-    
-    文件结构：
+    Initialization file log (each rank One log file each).
+
+    Logs are output to the console and local files at the same time to facilitate traceability of the training process.
+    The main process will additionally stderr Redirect to log file to catch unhandled exception traceback.
+
+    File structure:
       logs/
-      ├── run_rank0.log   ← rank 0 的完整 logging 输出
-      ├── run_rank1.log   ← rank 1 的完整 logging 输出
-      ├── stderr.log      ← rank 0 的 stderr（异常 traceback）
+      ├── run_rank0.log   ← rank 0 of complete logging output
+      ├── run_rank1.log   ← rank 1 of complete logging output
+      ├── stderr.log      ← rank 0 of stderr(Exception traceback)
       └── train_shape.csv
-    
+
     Args:
-        log_file: 日志文件路径（用于确定日志目录，实际文件名带 rank 后缀）
-        accelerator: Accelerate 加速器（用于获取 rank 信息）
+        log_file: Log file path (used to determine the log directory, the actual file name contains rank suffix)
+        accelerator: Accelerate accelerator (used to obtain rank information)
     """
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
     root_logger.handlers.clear()
-    
+
     rank = accelerator.process_index
-    
+
     formatter = logging.Formatter(
         "[%(asctime)s] [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
-    
-    # 控制台 handler（所有进程）
+
+    # console handler(all processes)
     console = logging.StreamHandler(sys.stdout)
     console.setFormatter(formatter)
     root_logger.addHandler(console)
-    
-    # 文件 handler（每个 rank 各自一个文件）
+
+    # File handler(each rank One file each)
     log_file.parent.mkdir(parents=True, exist_ok=True)
     rank_log = log_file.parent / f"run_rank{rank}.log"
     file_handler = logging.FileHandler(rank_log, encoding="utf-8")
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
-    
-    logging.info(f"[Rank {rank}] 日志将保存到: {rank_log}")
-    
-    # stderr 重定向（仅主进程，捕获未处理异常的 traceback）
+
+    logging.info(f"[Rank {rank}] The log will be saved to: {rank_log}")
+
+    # stderr Redirect (main process only, catches unhandled exceptions traceback)
     if accelerator.is_main_process:
         stderr_log_file = log_file.parent / "stderr.log"
         stderr_file = open(stderr_log_file, "a", encoding="utf-8")
         sys.stderr = _TeeWriter(sys.__stderr__, stderr_file)
-        logging.info(f"stderr 将保存到: {stderr_log_file}")
+        logging.info(f"stderr will save to: {stderr_log_file}")
 
 
 def build_run_paths(cfg: Any, accelerator: Accelerator) -> Tuple[Path, Path, Path, Path]:
     """
-    创建实验运行目录结构并保存配置。
-    
-    目录结构：
+    Create the experiment run directory structure and save the configuration.
+
+    Directory structure:
     {logdir}/{run_name}/
     ├── config.yaml
     ├── run_command.txt
@@ -451,36 +451,36 @@ def build_run_paths(cfg: Any, accelerator: Accelerator) -> Tuple[Path, Path, Pat
     logs_dir = run_root / "logs"
     visuals_train_dir = run_root / "visualizations" / "train"
     visuals_eval_dir = run_root / "visualizations" / "eval"
-    
+
     if accelerator.is_main_process:
         run_root.mkdir(parents=True, exist_ok=True)
         logs_dir.mkdir(parents=True, exist_ok=True)
         visuals_train_dir.mkdir(parents=True, exist_ok=True)
         visuals_eval_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 保存配置（使用 ml_collections.ConfigDict 的 to_dict 方法）
+
+        # Save the configuration (using ml_collections.ConfigDict of to_dict method)
         with (run_root / "config.yaml").open("w", encoding="utf-8") as f:
             f.write(yaml.dump(cfg.to_dict(), sort_keys=False))
-        
-        # 保存启动命令
+
+        # Save startup command
         with (run_root / "run_command.txt").open("w", encoding="utf-8") as f:
             f.write(" ".join(sys.argv))
-    
-    # 初始化文件日志
+
+    # Initialize file log
     _setup_file_logging(logs_dir / "run.log", accelerator)
-    
+
     return run_root, logs_dir, visuals_train_dir, visuals_eval_dir
 
 
 # =====================================================================
-# CheckpointIO - 检查点管理
+# CheckpointIO - Checkpoint management
 # =====================================================================
 
 @dataclass
 class CheckpointIO:
     """
-    检查点读写封装类。
-    使用 Accelerate 的 save_state/load_state 进行分布式安全的检查点操作。
+    Checkpoint read and write wrapper class.
+    Use Accelerate of save_state/load_state Perform distributed and secure checkpointing operations.
     """
 
     accelerator: Accelerator
@@ -489,57 +489,57 @@ class CheckpointIO:
     start_global_step: int = 0
 
     def save(self, system: Any, state: BaseState, cfg: Any, epoch: int, global_step: int) -> None:
-        """保存检查点（model + optimizer + random_states + meta）。"""
+        """save checkpoint(model + optimizer + random_states + meta)."""
         target = self.ckpt_dir / f"checkpoint_{epoch}_{global_step}"
         target.mkdir(parents=True, exist_ok=True)
-        
+
         self.accelerator.wait_for_everyone()
         self.accelerator.save_state(str(target))
-        
+
         if self.accelerator.is_main_process:
             meta = {"epoch": int(epoch), "global_step": int(global_step)}
             with (target / "meta.json").open("w", encoding="utf-8") as f:
                 json.dump(meta, f, ensure_ascii=False, indent=2)
-        
+
         self.accelerator.wait_for_everyone()
 
     def load(self, path: str, mode: str = "train") -> int:
         """
-        加载检查点（model + optimizer + random_states）。
-        
+        load checkpoint(model + optimizer + random_states).
+
         Args:
-            path: 检查点目录路径。
-            mode: "train" 时 start_epoch = epoch + 1；否则为 0。
+            path: Checkpoint directory path.
+            mode: "train" time start_epoch = epoch + 1; otherwise 0.
         """
         cp = path
         if not (isinstance(cp, str) and cp):
             self.start_epoch = 0
             return 0
-        
+
         root = Path(cp)
         meta_path = root / "meta.json"
         if not (root.is_dir() and meta_path.exists()):
             self.start_epoch = 0
             self.start_global_step = 0
             return 0
-        
-        # accelerator 一次性恢复：模型权重 + optimizer + random states
+
+        # accelerator One-time recovery: model weights + optimizer + random states
         self.accelerator.wait_for_everyone()
         self.accelerator.load_state(str(root))
         self.accelerator.wait_for_everyone()
-        
+
         meta = json.load(meta_path.open("r", encoding="utf-8"))
         self.start_epoch = int(meta["epoch"]) + 1 if mode == "train" else 0
         self.start_global_step = int(meta["global_step"])
         logging.info(
-            f"[CheckpointIO] 检查点已恢复: {root} "
-            f"(epoch={meta['epoch']}, step={meta['global_step']}, 恢复后 start_epoch={self.start_epoch})"
+            f"[CheckpointIO] Checkpoint restored: {root} "
+            f"(epoch={meta['epoch']}, step={meta['global_step']}, After recovery start_epoch={self.start_epoch})"
         )
         return self.start_epoch
 
 
 # =====================================================================
-# 从 utils 导入通用工具（避免重复定义）
+# from utils Import common tools (avoid duplication of definitions)
 # =====================================================================
 
 from oreo.systems.utils import MetricLogger, VisualIO

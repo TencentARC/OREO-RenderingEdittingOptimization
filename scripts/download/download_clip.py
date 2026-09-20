@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-下载 CLIP 模型与处理器到项目根目录下的 pretrained_weights/clip/clip-vit-large-patch14
-便于离线通过本地路径加载（model_id 与 processor_id 指向同一目录）：
+Download CLIP Model and processor to the project root directory pretrained_weights/clip/clip-vit-large-patch14
+Convenient for offline loading through local paths (model_id with processor_id pointing to the same directory):
   - clip_model_id      -> pretrained_weights/clip/clip-vit-large-patch14
   - clip_processor_id  -> pretrained_weights/clip/clip-vit-large-patch14
 """
@@ -24,13 +24,13 @@ def snapshot_to_dir(repo_id: str, out_dir: Path, revision: str = "main") -> Path
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="下载 CLIP 权重到 pretrained_weights/clip 以供离线加载")
-    parser.add_argument("--repo", default="openai/clip-vit-large-patch14", help="CLIP 模型与处理器所在仓库")
-    parser.add_argument("--revision", default="main", help="HF 仓库分支/修订")
+    parser = argparse.ArgumentParser(description="Download CLIP weight to pretrained_weights/clip for offline loading")
+    parser.add_argument("--repo", default="openai/clip-vit-large-patch14", help="CLIP The warehouse where the model and processor are located")
+    parser.add_argument("--revision", default="main", help="HF warehouse branch/revision")
     parser.add_argument(
         "--out",
         default=None,
-        help="输出根目录（默认写入到 <project_root>/pretrained_weights/clip/clip-vit-large-patch14）",
+        help="Output root directory (default writes to <project_root>/pretrained_weights/clip/clip-vit-large-patch14)",
     )
     args = parser.parse_args()
 
@@ -38,20 +38,20 @@ def main() -> int:
     out_root = Path(args.out) if args.out is not None else (project_root / "pretrained_weights" / "clip" / "clip-vit-large-patch14")
     out_root.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"➡️  下载 CLIP: {args.repo} -> {out_root}")
+    print(f"➡️  Download CLIP: {args.repo} -> {out_root}")
     path = snapshot_to_dir(args.repo, out_root, args.revision)
-    print(f"✅ 完成: {path}")
+    print(f"✅ Complete: {path}")
 
-    # 显示在配置文件中应设置的相对路径
+    # Shows the relative path that should be set in the configuration file
     try:
         rel_dir = out_root.relative_to(project_root)
     except ValueError:
         rel_dir = out_root
 
-    print("\n📌 请在配置中使用以下本地路径（模型与处理器相同）：")
+    print("\n📌 Please use the following local paths in your configuration (same model as processor):")
     print(f"clip_model_id: {rel_dir}")
     print(f"clip_processor_id: {rel_dir}")
-    print("\n🎉 全部完成！")
+    print("\n🎉 All done!")
     return 0
 
 

@@ -1,11 +1,11 @@
-"""Loss 管理和梯度计算"""
+"""Loss Management and gradient calculation"""
 import torch
 import torch.nn.functional as F
 from typing import Any, Dict, Optional, Tuple, Union
 
 
 # =====================================================================
-# 统一加权 Loss（真 Loss 模式，可直接 backward）
+# uniformly weighted Loss(True Loss mode, can be directly backward)
 # =====================================================================
 
 def apply_gradient_loss(
@@ -18,81 +18,81 @@ def apply_gradient_loss(
     eps: float = 1e-2,
 ) -> torch.Tensor:
     """
-    统一的加权 loss（真 Loss 模式，可直接 backward）。
-    
-    支持三种权重模式:
+    uniform weighting loss(True Loss mode, can be directly backward).
+
+    Supports three weight modes:
     - uniform: MSE(stu, tea)
-    - t: 时间步加权 MSE
-    - ada: 自适应归一化（DMD eq.8 风格）
-    
+    - t: time step weighting MSE
+    - ada: Adaptive Normalization (DMD eq.8 style)
+
     Args:
-        stu: 学生模型预测（需要梯度回传）
-        tea: 教师模型预测（无梯度）
-        clean: 真实 clean 数据（用于 ada 模式的 normalizer）
+        stu: Student model prediction (requires gradient backpass)
+        tea: Teacher model prediction (no gradient)
+        clean: true clean data (for ada pattern normalizer)
         weight_mode: "uniform" | "t" | "ada"
-        t_norm: 归一化时间步（t 模式必需）
-        dim: ada 模式的归一化维度（None 表示全局）
-        eps: ada 模式的 epsilon
-    
+        t_norm: Normalized time step (t mode required)
+        dim: ada The normalized dimension of the pattern (None Represents the global)
+        eps: ada pattern epsilon
+
     Returns:
-        loss: 真 loss，可直接 backward
+        loss: true loss, can be directly backward
     """
-    tea = tea.detach()  # 确保教师无梯度
-    
+    tea = tea.detach()  # Ensure teachers have no gradient
+
     if weight_mode == "uniform":
-        # 标准 MSE
+        # Standard MSE
         return F.mse_loss(stu.float(), tea.float())
-    
+
     elif weight_mode == "t":
-        # 时间步加权 MSE
+        # time step weighting MSE
         if t_norm is None:
-            raise ValueError("weight_mode='t' 需要提供 t_norm")
+            raise ValueError("weight_mode='t' Need to provide t_norm")
         diff = (stu - tea).float()  # [...]
         weighted_diff = diff * t_norm
         return (weighted_diff ** 2).mean()
-    
+
     elif weight_mode == "ada":
-        # 自适应归一化：先计算目标梯度，再归一化
-        # 目标梯度 = stu - tea
-        grad_raw = (stu - tea).detach().float()  # 无梯度，用于计算 normalizer
-        
-        # normalizer = |clean - tea|.mean(dim) + eps（或 |stu - tea|.mean()）
+        # Adaptive normalization: first calculate the target gradient, then normalize
+        # target gradient = stu - tea
+        grad_raw = (stu - tea).detach().float()  # No gradient, used for calculation normalizer
+
+        # normalizer = |clean - tea|.mean(dim) + eps(or |stu - tea|.mean())
         with torch.no_grad():
             if dim is None:
                 normalizer = grad_raw.abs().mean() + eps  # scalar
             else:
                 normalizer = grad_raw.abs().mean(dim=dim, keepdim=True) + eps
             grad_normalized = grad_raw / normalizer
-        
-        # 构造 loss，使 ∂loss/∂stu = grad_normalized
+
+        # structure loss, make ∂loss/∂stu = grad_normalized
         return (stu.float() * grad_normalized).mean()
-    
+
     else:
         raise ValueError(f"Unknown weight_mode: {weight_mode}. Use 'uniform', 't', or 'ada'.")
 
 
 # =====================================================================
-# LossDict - 统一 Loss 管理
+# LossDict - unify Loss management
 # =====================================================================
 
 class LossDict:
     """
-    统一 loss 管理：累加、加权、日志生成。
-    
-    用法：
-        losses = LossDict(device="cuda:0")  # 指定目标设备
+    unify loss Management: accumulation, weighting, log generation.
+
+    Usage:
+        losses = LossDict(device="cuda:0")  # Specify target device
         losses.add("ssim", loss_ssim, weight=cfg.ssim_weight)
         losses.add("lpips", loss_lpips, weight=cfg.lpips_weight)
-        
-        total = losses.total()           # 自动求和（所有 loss 已移到同一设备）
+
+        total = losses.total()           # Automatic summation (all loss Moved to the same device)
         logs = losses.to_logs()          # {"loss/ssim": ..., "loss/lpips": ..., "loss/total": ...}
     """
-    
+
     def __init__(self, device: torch.device = None):
-        self._items: Dict[str, torch.Tensor] = {}  # 加权后的 loss
-        self._raw: Dict[str, torch.Tensor] = {}    # 原始 loss（用于日志）
-        self._device = device  # 目标设备，用于统一 tensor 位置
-    
+        self._items: Dict[str, torch.Tensor] = {}  # weighted loss
+        self._raw: Dict[str, torch.Tensor] = {}    # original loss(for logging)
+        self._device = device  # target device for unification tensor location
+
     def add(
         self,
         name: str,
@@ -100,55 +100,55 @@ class LossDict:
         weight: float = 1.0,
     ) -> "LossDict":
         """
-        添加 loss 项。
-        
+        add loss item.
+
         Args:
-            name: loss 名称（如 "ssim", "lpips"）
-            loss: loss tensor 或 None
-            weight: 权重（默认 1.0，表示权重已在外部应用）
-        
+            name: loss Name (such as "ssim", "lpips")
+            loss: loss tensor or None
+            weight: weight (default 1.0, indicating that the weights have been applied externally)
+
         Returns:
-            self（支持链式调用）
+            self(Supports chain calls)
         """
         if loss is None or weight <= 0:
             return self
-        
-        # 移动到目标设备（如果指定）
+
+        # Move to target device (if specified)
         if self._device is not None and loss.device != self._device:
             loss = loss.to(self._device)
-        
+
         weighted = loss * weight if weight != 1.0 else loss
         self._items[name] = weighted
         self._raw[name] = loss
         return self
-    
+
     def total(self) -> torch.Tensor:
-        """计算加权 loss 总和"""
+        """Calculate weighting loss sum"""
         if not self._items:
             device = self._device if self._device else "cpu"
             return torch.tensor(0.0, device=device)
-        
+
         return sum(self._items.values())
-    
+
     def to_logs(self, prefix: str = "loss/") -> Dict[str, torch.Tensor]:
         """
-        生成日志字典。
-        
+        Generate log dictionary.
+
         Args:
-            prefix: key 前缀（默认 "loss/"）
-        
+            prefix: key prefix (default "loss/")
+
         Returns:
             dict: {"loss/ssim": tensor, "loss/lpips": tensor, "loss/total": tensor}
         """
         logs = {}
         for name, val in self._raw.items():
             logs[f"{prefix}{name}"] = val.detach()
-        
+
         if self._items:
             logs[f"{prefix}total"] = self.total().detach()
-        
+
         return logs
-    
+
     def __bool__(self) -> bool:
-        """是否有任何 loss"""
+        """are there any loss"""
         return bool(self._items)

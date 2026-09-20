@@ -1,27 +1,27 @@
 #!/bin/bash
-# Dense FlowEdit 评估脚本（DDP 多卡）
+# Dense FlowEdit evaluation script (DDP Doka)
 #
-# 对比：
+# Comparison:
 #   Teacher (pretrained): Dense ODE → Sparse ODE
 #   Student (finetuned) : Dense ODE → Dense FlowEdit → Sparse ODE
 #
-# 用法：
+# Usage:
 #   bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh
 #   bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh <CKPT_INPUT>
 #   bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh <CKPT_INPUT> <EVAL_DATASET>
 #
-# CKPT_INPUT 支持三种输入：
-#   1) "" -> 不加载 checkpoint（student ≈ teacher，用于验证框架）
-#   2) ".../checkpoints/checkpoint_xxx" -> 单个 ckpt
-#   3) ".../checkpoints" -> 遍历所有 checkpoint_*
+# CKPT_INPUT Three inputs are supported:
+#   1) "" -> Not loading checkpoint(student ≈ teacher, for verification framework)
+#   2) ".../checkpoints/checkpoint_xxx" -> single ckpt
+#   3) ".../checkpoints" -> Traverse all checkpoint_*
 #
-# EVAL_DATASET 支持：
-#   1) alphaimages   -> dataset/alphaimages_v3/test（默认）
+# EVAL_DATASET Support:
+#   1) alphaimages   -> dataset/alphaimages_v3/test(default)
 #   2) alphaimage_train -> dataset/alphaimages_v3/train
 #   3) gso_selected  -> dataset/gso_test_selected
 #   4) toys4k        -> dataset/toys4k_test
 #
-# FlowEdit 参数可通过附加 --config.rollout.flowedit.* 覆盖默认值，例如：
+# FlowEdit Parameters can be passed by appending --config.rollout.flowedit.* Override the default value, for example:
 #   bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh <CKPT> gso_selected \
 #     --config.rollout.flowedit.n_max=12 \
 #     --config.rollout.flowedit.cfg_scale_tgt=4.0 \
@@ -33,7 +33,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 CKPT_INPUT="${1:-}"
 EVAL_DATASET="${2:-alphaimages}"
-# 收集其余参数（FlowEdit 覆盖项）
+# Collect the remaining parameters (FlowEdit coverage items)
 if [ "$#" -ge 2 ]; then
     shift 2
 elif [ "$#" -eq 1 ]; then
@@ -60,8 +60,8 @@ case "$EVAL_DATASET" in
         RUN_SUFFIX="_toys4k"
         ;;
     *)
-        echo "错误: 未知 EVAL_DATASET: $EVAL_DATASET"
-        echo "支持的 EVAL_DATASET: alphaimages, alphaimage_train, gso_selected, toys4k"
+        echo "Error: unknown EVAL_DATASET: $EVAL_DATASET"
+        echo "supported EVAL_DATASET: alphaimages, alphaimage_train, gso_selected, toys4k"
         exit 1
         ;;
 esac
@@ -71,7 +71,7 @@ CONFIG="config/trellis_oreo.py"
 GPU_COUNT=$(echo "$CUDA_VISIBLE_DEVICES" | tr ',' '\n' | wc -l)
 CKPT_INPUT="${CKPT_INPUT%/}"
 
-# 构建待评估 ckpt 列表
+# Build to be evaluated ckpt list
 CKPT_LIST=()
 if [ -z "$CKPT_INPUT" ]; then
     CKPT_LIST+=("")
@@ -80,7 +80,7 @@ elif [ "$(basename "$CKPT_INPUT")" = "checkpoints" ]; then
         find "$CKPT_INPUT" -maxdepth 1 -mindepth 1 -type d -name "checkpoint_*" | sort -V
     )
     if [ "${#CKPT_LIST[@]}" -eq 0 ]; then
-        echo "错误: 在 $CKPT_INPUT 下未找到 checkpoint_*"
+        echo "Error: in $CKPT_INPUT Not found below checkpoint_*"
         exit 1
     fi
 else
@@ -88,16 +88,16 @@ else
 fi
 
 echo "========================================"
-echo "Dense FlowEdit DDP 评估"
+echo "Dense FlowEdit DDP Assessment"
 echo "========================================"
-echo "可见 GPU: $CUDA_VISIBLE_DEVICES ($GPU_COUNT 张)"
+echo "visible GPU: $CUDA_VISIBLE_DEVICES ($GPU_COUNT Zhang)"
 echo "EVAL_DATASET: $EVAL_DATASET"
 echo "EVAL_DIR: $EVAL_DIR"
 echo "LOGDIR_ROOT: $LOGDIR_ROOT"
 echo "CONFIG: $CONFIG"
-echo "CKPT_INPUT: ${CKPT_INPUT:-（无，使用 pretrained）}"
-echo "待评估数量: ${#CKPT_LIST[@]}"
-[ "${#EXTRA_ARGS[@]}" -gt 0 ] && echo "额外参数: ${EXTRA_ARGS[*]}"
+echo "CKPT_INPUT: ${CKPT_INPUT:-(None, use pretrained)}"
+echo "Quantity to be evaluated: ${#CKPT_LIST[@]}"
+[ "${#EXTRA_ARGS[@]}" -gt 0 ] && echo "extra parameters: ${EXTRA_ARGS[*]}"
 echo "========================================"
 
 for CKPT in "${CKPT_LIST[@]}"; do
@@ -110,7 +110,7 @@ for CKPT in "${CKPT_LIST[@]}"; do
         CKPT_NAME="pretrained_baseline"
     fi
 
-    # 输出目录后缀与脚本中 _dense_flowedit 一致
+    # The output directory suffix is the same as in the script _dense_flowedit consistent
     OUT_DIR="${LOGDIR_ROOT}/${RUN_NAME}/eval_teacher_student/${CKPT_NAME}_dense_flowedit"
     DONE_FLAG="${OUT_DIR}/teacher_student_similarity.csv"
     IS_COMPLETE=0
@@ -129,16 +129,16 @@ PY
     fi
 
     if [ "$IS_COMPLETE" -eq 1 ]; then
-        echo "跳过已完成 ckpt: ${CKPT:-（无，使用 pretrained）}"
-        echo "已有结果: $DONE_FLAG"
+        echo "skip completed ckpt: ${CKPT:-(None, use pretrained)}"
+        echo "Already have results: $DONE_FLAG"
         continue
     elif [ -f "$DONE_FLAG" ]; then
-        echo "检测到未完成 CSV，将跳过已完成样本并继续补跑: $DONE_FLAG"
+        echo "Incomplete detected CSV, will skip the completed sample and continue to make up the run: $DONE_FLAG"
     fi
 
-    echo "------------ 开始评估 ------------"
+    echo "------------ Start assessment ------------"
     echo "RUN_NAME: $RUN_NAME"
-    echo "CKPT: ${CKPT:-（无，使用 pretrained）}"
+    echo "CKPT: ${CKPT:-(None, use pretrained)}"
     echo "OUT_DIR: $OUT_DIR"
     echo "----------------------------------"
 

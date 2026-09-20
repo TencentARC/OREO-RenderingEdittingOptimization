@@ -1,26 +1,26 @@
 """
-流水线并行基础设施 — 真异步版本。
+Pipeline parallel infrastructure — True asynchronous version.
 
-提供通用的流水线并行 Mixin，支持：
-- 后台线程执行 guidance forward + backward（不阻塞 train GPU）
-- FIFO 队列传递 AsyncGuidanceResult
-- 可被任意 Guidance paradigm 复用
+Provides general pipeline parallelism Mixin, support:
+- Background thread execution guidance forward + backward(not blocking train GPU)
+- FIFO Queue delivery AsyncGuidanceResult
+- can be arbitrary Guidance paradigm Reuse
 
-并行原理：
-  Train GPU (cuda:0) 和 Guidance GPU (cuda:2) 是独立硬件。
-  PyTorch 的 CUDA 操作执行时释放 GIL，所以用 threading.Thread
-  可以让两个 GPU 同时工作：
-    - 主线程：在 Train GPU 上做 rollout / decode / render / Phase 3
-    - 后台线程：在 Guidance GPU 上做 compute_guidance + backward
+Parallel principle:
+  Train GPU (cuda:0) and Guidance GPU (cuda:2) It is independent hardware.
+  PyTorch of CUDA Released when the operation is executed GIL, so use threading.Thread
+  can make two GPU Working simultaneously:
+    - Main thread: in Train GPU Do it on rollout / decode / render / Phase 3
+    - Background thread: in Guidance GPU Do it on compute_guidance + backward
 
-两层接口：
-- submit_async() / wait_and_get(): comp_rgb 层面 proxy，
-  在 guidance 侧独立 backward 得到 rgb_grad，train 侧用 comp_rgb.backward(rgb_grad) 驱动反传。
-- has_pending() / pending_count: 队列状态查询。
+Two-layer interface:
+- submit_async() / wait_and_get(): comp_rgb level proxy,
+  in guidance Side independent backward get rgb_grad,train Side use comp_rgb.backward(rgb_grad) Drive backpass.
+- has_pending() / pending_count: Queue status query.
 
 AsyncGuidanceResult:
-  存储 guidance 侧已算好的像素级梯度 (rgb_grad) 和标量日志，
-  train GPU 侧无需重复 guidance forward/backward。
+  storage guidance Calculated pixel-level gradient (rgb_grad) and scalar log,
+  train GPU No need to repeat guidance forward/backward.
 
 Usage:
     class FlowEditGuidancePP(PipelineParallelMixin, FlowEditGuidance):
@@ -45,38 +45,38 @@ T = TypeVar('T')
 
 
 # =====================================================================
-# AsyncGuidanceResult — 异步 Guidance 返回结果
+# AsyncGuidanceResult — asynchronous Guidance Return results
 # =====================================================================
 
 @dataclass
 class AsyncGuidanceResult:
     """
-    异步 Guidance 返回结果。
+    asynchronous Guidance Return results.
 
-    与 GuidanceResult 不同，这里存储的是已计算好的 rgb_grad（像素级梯度），
-    而非需要 backward 的 loss tensor。用于 train GPU 侧 comp_rgb.backward(rgb_grad)。
+    with GuidanceResult Different, what is stored here is the calculated rgb_grad(pixel-level gradient),
+    rather than need backward of loss tensor. used for train GPU side comp_rgb.backward(rgb_grad).
 
-    生命周期：
-        1. submit_async() 内部：detach comp_rgb → guidance forward → backward → rgb_grad
-        2. wait_and_get(target_device) 返回本对象，rgb_grad 已搬到 target_device
-        3. 调用方执行 comp_rgb.backward(rgb_grad)
+    Life cycle:
+        1. submit_async() Internal:detach comp_rgb → guidance forward → backward → rgb_grad
+        2. wait_and_get(target_device) Return this object,rgb_grad Moved to target_device
+        3. Caller executes comp_rgb.backward(rgb_grad)
 
     Attributes:
-        rgb_grad: ∂(weight*L)/∂comp_rgb，形状与 comp_rgb 一致 (B, V, H, W, 3)
-        loss_scalar: 加权后的标量 loss 值（float，用于日志）
-        loss_dict: 细分 loss 字典（str → float，用于日志），可为 None
-        edited_imgs: 编辑后图像 (B,V,C,H,W)，FlowEdit 专用，可为 None
-        trackers: FlowEdit StateTracker 列表（用于 progress 可视化），可为 None
-                  ★ 内部 latent 保留在 guidance GPU（get_progress_grid 需要）
+        rgb_grad: ∂(weight*L)/∂comp_rgb, the shape is the same as comp_rgb consistent (B, V, H, W, 3)
+        loss_scalar: weighted scalar loss value(float, for logs)
+        loss_dict: Segmentation loss Dictionary(str → float, used for logs), which can be None
+        edited_imgs: Edited image (B,V,C,H,W),FlowEdit Dedicated, available for None
+        trackers: FlowEdit StateTracker list (for progress visualization), which can be None
+                  ★ internal latent remain in guidance GPU(get_progress_grid need)
     """
     rgb_grad: torch.Tensor                                  # (B, V, H, W, 3)
-    loss_scalar: float = 0.0                                # 加权后标量 loss
-    loss_dict: Optional[Dict[str, float]] = None            # 细分 loss（日志用）
-    edited_imgs: Optional[torch.Tensor] = None              # (B, V, C, H, W) 编辑后图像
-    trackers: Optional[List] = None                         # FlowEdit StateTracker 列表
-    # ---- 挂钟计时（双 GPU 利用率分析）----
-    guid_wall_start: float = 0.0                            # worker 开始 GPU 计算的 perf_counter
-    guid_wall_end: float = 0.0                              # worker 完成 GPU 计算的 perf_counter
+    loss_scalar: float = 0.0                                # weighted scalar loss
+    loss_dict: Optional[Dict[str, float]] = None            # Segmentation loss(for logs)
+    edited_imgs: Optional[torch.Tensor] = None              # (B, V, C, H, W) Edited image
+    trackers: Optional[List] = None                         # FlowEdit StateTracker list
+    # ---- Wall clock timing (dual GPU Utilization analysis)----
+    guid_wall_start: float = 0.0                            # worker start GPU calculated perf_counter
+    guid_wall_end: float = 0.0                              # worker Complete GPU calculated perf_counter
 
     @classmethod
     def from_guidance_result(
@@ -86,9 +86,9 @@ class AsyncGuidanceResult:
         guidance_weight: float,
     ) -> "AsyncGuidanceResult":
         """
-        从 GuidanceResult + rgb_grad 构建异步结果。
+        from GuidanceResult + rgb_grad Build asynchronous results.
 
-        集中处理 detach / scalar 转换，避免 submit_async 内部散落转换逻辑。
+        centralized processing detach / scalar convert, avoid submit_async Scattered conversion logic internally.
         """
         loss_scalar = (result.loss * guidance_weight).item()
         loss_dict_scalar: Optional[Dict[str, float]] = None
@@ -103,66 +103,66 @@ class AsyncGuidanceResult:
             loss_scalar=loss_scalar,
             loss_dict=loss_dict_scalar,
             edited_imgs=result.edited_imgs.detach() if result.edited_imgs is not None else None,
-            trackers=result.trackers,  # 内部 tensor 已是 detached clone
+            trackers=result.trackers,  # internal tensor Already detached clone
         )
 
 
 # =====================================================================
-# PipelineParallelMixin — 真异步版本
+# PipelineParallelMixin — True asynchronous version
 # =====================================================================
 
 class PipelineParallelMixin:
     """
-    流水线并行 Mixin（真异步版本）。
-    
-    继承此 Mixin 的类需要：
-    1. 有 `device` 属性（Guidance CUDA 设备）
-    2. 有 `compute_guidance(comp_rgb, condition_images, **kwargs)` 方法
-    
-    并行机制：
-    - submit_async(): 在后台 Thread 中执行 guidance forward + backward，立即返回
-    - wait_and_get(): join 后台线程 → 从队列取出 AsyncGuidanceResult
-    - 主线程可在 submit 后立即继续 Train GPU 上的工作（rollout / P3 等）
-    
-    线程安全：
-    - _join_prev_thread(): 每次 submit/wait 前先 join 上一个线程，
-      保证 Guidance GPU 串行执行，避免显存竞争
-    - 后台线程异常保存在 _pp_error，wait_and_get 时抛出
+    Pipeline parallelism Mixin(True asynchronous version).
+
+    inherit this Mixin The class requires:
+    1. Yes `device` properties (Guidance CUDA equipment)
+    2. Yes `compute_guidance(comp_rgb, condition_images, **kwargs)` method
+
+    Parallel mechanism:
+    - submit_async(): in the background Thread executed in guidance forward + backward, return immediately
+    - wait_and_get(): join background thread → Remove from queue AsyncGuidanceResult
+    - The main thread can be found in submit continue immediately after Train GPU work on (rollout / P3 etc.)
+
+    Thread safety:
+    - _join_prev_thread(): every time submit/wait First join previous thread,
+      guarantee Guidance GPU Serial execution to avoid memory contention
+    - Background thread exceptions are saved in _pp_error,wait_and_get thrown when
     """
-    
-    # 声明需要的属性（子类必须提供）
+
+    # Declare required attributes (subclasses must provide them)
     device: torch.device
-    
+
     def _init_pipeline_parallel(self, num_streams: int = 2):
         """
-        初始化流水线并行基础设施。
-        
-        子类需要在 __init__ 中调用此方法。
-        
+        Initialize the pipeline parallel infrastructure.
+
+        Subclasses need to be in __init__ Call this method in .
+
         Args:
-            num_streams: CUDA stream 数量（默认 2，双缓冲）
+            num_streams: CUDA stream quantity (default 2, double buffering)
         """
         self._pp_streams = [
             torch.cuda.Stream(device=self.device)
             for _ in range(num_streams)
         ]
-        self._pp_queue: deque = deque()  # 无 maxlen 限制，支持任意 accum_steps
+        self._pp_queue: deque = deque()  # None maxlen Restrictions, supports any accum_steps
         self._pp_slot_counter = 0
         self._pp_num_streams = num_streams
-        self._pp_thread: Optional[threading.Thread] = None  # 后台线程引用
-        self._pp_error: Optional[BaseException] = None       # 后台线程异常捕获
-        
+        self._pp_thread: Optional[threading.Thread] = None  # Background thread reference
+        self._pp_error: Optional[BaseException] = None       # Background thread exception capture
+
         logging.info(f"[PipelineParallel] Async mode enabled with {num_streams} streams on {self.device}")
-    
+
     def _join_prev_thread(self) -> None:
         """
-        等待上一个后台线程完成，并检查异常。
-        
-        调用时机：
-        - submit_async 开头：保证 Guidance GPU 串行执行（一次只跑一个 guidance）
-        - wait_and_get 开头：确保结果已入队
-        
-        异常传播：后台线程捕获的异常会在此处重新抛出，不会被静默吞掉。
+        Wait for the previous background thread to complete and check for exceptions.
+
+        Calling time:
+        - submit_async Beginning: guaranteed Guidance GPU Serial execution (only run one at a time guidance)
+        - wait_and_get Start: Make sure the result is enqueued
+
+        Exception propagation: Exceptions caught by the background thread will be re-thrown here and will not be swallowed silently.
         """
         if self._pp_thread is not None:
             self._pp_thread.join()
@@ -171,7 +171,7 @@ class PipelineParallelMixin:
             err = self._pp_error
             self._pp_error = None
             raise RuntimeError(f"[PipelineParallel] Background guidance thread failed: {err}") from err
-    
+
     def submit_async(
         self,
         comp_rgb: torch.Tensor,
@@ -183,46 +183,46 @@ class PipelineParallelMixin:
         **kwargs,
     ) -> None:
         """
-        真异步提交 guidance 计算任务。
+        True asynchronous submission guidance Computational tasks.
 
-        在后台 Thread 中执行 guidance forward + backward，主线程立即返回。
-        Train GPU 可在此期间继续做 drain_prev / build_next 等工作。
+        in the background Thread executed in guidance forward + backward, the main thread returns immediately.
+        Train GPU You can continue to do it during this period drain_prev / build_next Waiting for work.
 
-        流程：
-          主线程:
-            0. join 上一个后台线程（保证 Guidance GPU 串行）
-            1. detach comp_rgb → 搬到 Guidance GPU → requires_grad proxy
-            2. 启动后台线程 → 立即返回
-          后台线程:
+        Process:
+          main thread:
+            0. join Previous background thread (guaranteed Guidance GPU serial)
+            1. detach comp_rgb → move to Guidance GPU → requires_grad proxy
+            2. Start background thread → Return immediately
+          background thread:
             3. compute_guidance(proxy, ..., guidance_cfg=...) → GuidanceResult
             4. (loss * weight).backward() → proxy.grad = rgb_grad
-            5. 打包 AsyncGuidanceResult → 入队
+            5. Pack AsyncGuidanceResult → Join the team
 
         Args:
-            comp_rgb: 渲染图像 (B,V,H,W,C)，float [0,1]，来自 train 侧（有 autograd 图）
-            condition_images: 条件图像列表 [len=B] of PIL.Image
-            guidance_weight: guidance loss 权重
-            guidance_cfg: 运行时配置（per-stage），传给 compute_guidance
-            rank: 当前进程的 rank（传递给 compute_guidance）
-            **kwargs: 传递给 compute_guidance 的额外参数
+            comp_rgb: render image (B,V,H,W,C),float [0,1], from train side (with autograd Figure)
+            condition_images: Conditional image list [len=B] of PIL.Image
+            guidance_weight: guidance loss weight
+            guidance_cfg: Runtime configuration (per-stage), passed to compute_guidance
+            rank: of the current process rank(passed to compute_guidance)
+            **kwargs: passed to compute_guidance additional parameters
         """
-        # ---- 0. 等待上一个 submit 完成（Guidance GPU 串行，避免显存竞争） ----
+        # ---- 0. Wait for the previous one submit done (Guidance GPU serial to avoid memory contention) ----
         self._join_prev_thread()
-        
-        # ---- 1. 在 Train GPU 上 detach → 搬到 Guidance GPU ----
-        # 只同步 comp_rgb 所在设备的当前 stream（不全局同步，避免阻塞 Guidance GPU）
+
+        # ---- 1. in Train GPU on detach → move to Guidance GPU ----
+        # Sync only comp_rgb The device's current stream(Not globally synchronized to avoid blocking Guidance GPU)
         torch.cuda.current_stream(comp_rgb.device).synchronize()
-        proxy_rgb = comp_rgb.detach().to(self.device).requires_grad_(True)  # (B, V, H, W, 3)，在 Guidance GPU 上
-        
-        # ---- 2. 在后台线程中执行 guidance forward + backward ----
+        proxy_rgb = comp_rgb.detach().to(self.device).requires_grad_(True)  # (B, V, H, W, 3), in Guidance GPU on
+
+        # ---- 2. Execute in background thread guidance forward + backward ----
         slot_idx = self._pp_slot_counter % self._pp_num_streams
         stream = self._pp_streams[slot_idx]
-        
+
         def _worker():
             try:
                 _wall_start = time.perf_counter()
                 with torch.cuda.stream(stream):
-                    # guidance forward（最耗时的部分，~59s）
+                    # guidance forward(The most time-consuming part,~59s)
                     result: GuidanceResult = self.compute_guidance(
                         proxy_rgb, condition_images,
                         guidance_cfg=guidance_cfg, rank=rank, **kwargs
@@ -230,18 +230,18 @@ class PipelineParallelMixin:
                     # guidance backward → rgb_grad
                     (result.loss * guidance_weight).backward()
                     rgb_grad = proxy_rgb.grad.detach()  # (B, V, H, W, 3)
-                    
-                    # 打包结果
+
+                    # Pack results
                     async_result = AsyncGuidanceResult.from_guidance_result(
                         result, rgb_grad, guidance_weight
                     )
-                    
-                    # 释放 guidance 侧中间产物
-                    # ★ 不要 del proxy_rgb：它是闭包捕获的变量，
-                    #   del 会让 Python 将其标记为局部变量 → UnboundLocalError
+
+                    # release guidance side intermediate product
+                    # ★ Don't del proxy_rgb: It is the variable captured by the closure,
+                    #   del will let Python Mark it as a local variable → UnboundLocalError
                     del result
-                
-                # 确保 stream 中所有 kernel 完成后再入队
+
+                # ensure stream All in kernel Join the team after completion
                 stream.synchronize()
                 _wall_end = time.perf_counter()
                 async_result.guid_wall_start = _wall_start
@@ -249,62 +249,62 @@ class PipelineParallelMixin:
                 self._pp_queue.append(async_result)
             except BaseException as e:
                 self._pp_error = e
-        
+
         self._pp_thread = threading.Thread(target=_worker, daemon=True)
-        self._pp_thread.start()  # ★ 立即返回！主线程可以继续做 Train GPU 上的工作
+        self._pp_thread.start()  # ★ Return now! The main thread can continue to do Train GPU work on
         self._pp_slot_counter += 1
-    
+
     def wait_and_get(
         self,
         target_device: Optional[torch.device] = None,
     ) -> AsyncGuidanceResult:
         """
-        获取最早提交的 submit_async 结果（FIFO）。
-        
-        正常 case（队列非空）：直接 pop，不 join 当前后台线程。
-          → guid(N) 继续在后台线程跑，P3(N-1) 可以并行执行。
-        边界 case（队列为空，如 accum 末尾 / epoch 末尾）：
-          join 当前后台线程等待结果入队。
+        Get the earliest submission submit_async Result (FIFO).
+
+        normal case(Queue is not empty): Direct pop, no join The current background thread.
+          → guid(N) Continue running in the background thread,P3(N-1) Can be executed in parallel.
+        border case(The queue is empty, such as accum end / epoch end):
+          join The current background thread is waiting for the result to be enqueued.
 
         Args:
-            target_device: rgb_grad 的目标设备（None 则保持在 Guidance GPU 上）
-        
+            target_device: rgb_grad The target device (None then remain at Guidance GPU (up)
+
         Returns:
-            AsyncGuidanceResult: 包含 rgb_grad + 标量日志
-        
+            AsyncGuidanceResult: contains rgb_grad + scalar log
+
         Raises:
-            RuntimeError: 后台线程异常 或 队列为空
+            RuntimeError: Background thread exception or Queue is empty
         """
-        # ---- 只在队列为空时阻塞等待（边界 case） ----
-        # 正常 case: submit_async(N) 已 join guid(N-1) → 结果在队列 → 直接 pop
-        # 边界 case: accum 末尾/epoch 末尾没有下一个 submit → 需手动等
+        # ---- Only blocks and waits when the queue is empty (boundary case) ----
+        # normal case: submit_async(N) Already join guid(N-1) → results in queue → direct pop
+        # border case: accum end/epoch There is no next one at the end submit → Need to wait manually
         if not self._pp_queue:
             self._join_prev_thread()
-        
+
         if not self._pp_queue:
             raise RuntimeError("No pending async submission. Call submit_async() first.")
-        
-        # 从队列头部取出（FIFO）
+
+        # Remove from the head of the queue (FIFO)
         async_result: AsyncGuidanceResult = self._pp_queue.popleft()
-        
-        # 搬到目标设备（如果需要）
+
+        # Move to target device (if needed)
         if target_device is not None:
             if async_result.rgb_grad.device != target_device:
                 async_result.rgb_grad = async_result.rgb_grad.to(target_device)
             if async_result.edited_imgs is not None and async_result.edited_imgs.device != target_device:
                 async_result.edited_imgs = async_result.edited_imgs.to(target_device)
-            # ★ trackers 保留在 guidance GPU：get_progress_grid(pipe, n) 需要
-            #   pipe (VAE) 和 tracker 内部 latent 都在 guidance GPU 上
-        
+            # ★ trackers remain in guidance GPU:get_progress_grid(pipe, n) need
+            #   pipe (VAE) and tracker internal latent All are there guidance GPU on
+
         return async_result
-    
+
     def has_pending(self) -> bool:
-        """检查是否有 pending 的异步提交。"""
+        """Check if there is pending asynchronous submission."""
         return len(self._pp_queue) > 0 or self._pp_thread is not None
-    
+
     @property
     def pending_count(self) -> int:
-        """返回 pending 任务数量（含正在执行的后台线程）。"""
+        """Return pending Number of tasks (including background threads being executed)."""
         count = len(self._pp_queue)
         if self._pp_thread is not None and self._pp_thread.is_alive():
             count += 1

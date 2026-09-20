@@ -1,16 +1,16 @@
 #!/bin/bash
-# TRELLIS Dual-Stage (Sparse + Dense) Contrastive FlowEdit 训练脚本（多机版）
+# TRELLIS Dual-Stage (Sparse + Dense) Contrastive FlowEdit Training script (multi-machine version)
 #
-# 训练流程：
-#   Sparse Stage: Pretrained Rollout → 加噪 → Student velocity → Contrastive loss
-#   Dense Stage:  复用 Sparse 的 c_src/c_tgt → Dense velocity → Contrastive loss
+# Training process:
+#   Sparse Stage: Pretrained Rollout → Noise → Student velocity → Contrastive loss
+#   Dense Stage:  Reuse Sparse of c_src/c_tgt → Dense velocity → Contrastive loss
 #
-# GPU 分配策略（共享模式）：
-# - 全部 N 张卡同时用于 Trellis 训练 (DDP) 和 Guidance (FlowEdit)
+# GPU Allocation strategy (shared mode):
+# - All N cards used simultaneously Trellis training (DDP) and Guidance (FlowEdit)
 #
-# 使用示例：
-# - 默认 8 张卡：CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 ./main_trellis_oreo.sh
-# - 自定义：CUDA_VISIBLE_DEVICES=4,5,6,7 ./main_trellis_oreo.sh
+# Usage example:
+# - Default 8 Cards:CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 ./main_trellis_oreo.sh
+# - Customize:CUDA_VISIBLE_DEVICES=4,5,6,7 ./main_trellis_oreo.sh
 
 : "${CUDA_VISIBLE_DEVICES:=0,1,2,3,4,5,6,7}"
 RUN_NAME="${RUN_NAME:-trellis_oreo}"
@@ -22,12 +22,12 @@ GPU_COUNT=$(echo "$CUDA_VISIBLE_DEVICES" | tr ',' '\n' | wc -l)
 TRAIN_GPU_COUNT=$GPU_COUNT
 
 echo "========================================"
-echo "GPU 分配信息（Dual-Stage Contrastive FlowEdit — Latent 空间对比学习）"
+echo "GPU allocation information (Dual-Stage Contrastive FlowEdit — Latent spatial contrastive learning)"
 echo "========================================"
-echo "可见 GPU: $CUDA_VISIBLE_DEVICES ($GPU_COUNT 张)"
-echo "训练进程数: $TRAIN_GPU_COUNT"
-echo "训练 + Guidance: cuda:0-$((GPU_COUNT-1))（共享同一设备）"
-echo "渲染模式: GS Color"
+echo "visible GPU: $CUDA_VISIBLE_DEVICES ($GPU_COUNT Zhang)"
+echo "Number of training processes: $TRAIN_GPU_COUNT"
+echo "training + Guidance: cuda:0-$((GPU_COUNT-1))(share the same device)"
+echo "Rendering mode: GS Color"
 echo "========================================"
 
 python -m accelerate.commands.launch \

@@ -1,8 +1,8 @@
 """
-Guidance Paradigms 模块。
+Guidance Paradigms module.
 
-提供 retained Guidance 范式实现：
-- FlowEdit: 多步编辑式训练/推理（普通与 pipeline-parallel 变体）
+provide retained Guidance Paradigm implementation:
+- FlowEdit: Multi-step editing training/Reasoning (general vs. pipeline-parallel variant)
 """
 
 from oreo.guidance.paradigms.flowedit import FlowEditGuidance, FlowEditGuidancePP

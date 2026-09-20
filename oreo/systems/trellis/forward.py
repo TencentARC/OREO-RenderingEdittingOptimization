@@ -1,13 +1,13 @@
 """
-Trellis 共享前向传播、渲染、评估函数。
+Trellis Share forward propagation, rendering, and evaluation functions.
 
-从 system.py 提取的纯计算函数，供 retained Dual-Stage 入口与评估器复用。
+from system.py Extracted pure calculation function for retained Dual-Stage Entry and evaluator reuse.
 
-主要组件：
-1. decode_and_render_mesh: 解码 SparseTensor → Mesh → 渲染多视角图像
-2. decode_and_render_gs:   解码 SparseTensor → Gaussian Splatting → 渲染多视角图像
-3. trellis_forward:        共享前向传播（Dense Sampling → Rollout → Decode → Render）
-4. evaluate:               评估循环（推理 + 可视化保存）
+Main components:
+1. decode_and_render_mesh: Decode SparseTensor → Mesh → Rendering multi-view images
+2. decode_and_render_gs:   Decode SparseTensor → Gaussian Splatting → Rendering multi-view images
+3. trellis_forward:        Shared forward pass (Dense Sampling → Rollout → Decode → Render)
+4. evaluate:               Evaluation loop (reasoning + Visual save)
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from oreo.systems.utils.visual import TrellisVisualIO
 
 
 # =====================================================================
-# 渲染工具函数 - Mesh 渲染
+# Rendering tool functions - Mesh rendering
 # =====================================================================
 
 def decode_and_render_mesh(
@@ -39,32 +39,32 @@ def decode_and_render_mesh(
     device: torch.device,
 ) -> Dict[str, Any]:
     """
-    解码潜变量为 Mesh 并渲染多视角图像。
+    The decoded latent variable is Mesh and render multi-view images.
 
     Args:
-        latents: SparseTensor, rollout 输出的稀疏特征
-        cameras: TrellisState.Cameras, 相机参数容器
-        pipeline: 生成 pipeline，提供 decode 方法
-        renderer: Mesh 渲染器实例
-        device: 运行设备
+        latents: SparseTensor, rollout Output sparse features
+        cameras: TrellisState.Cameras, Camera parameter container
+        pipeline: generate pipeline, provide decode method
+        renderer: Mesh Renderer instance
+        device: Run the device
 
     Returns:
-        dict: 渲染输出，包含：
-            - "color": (B,V,H,W,3) 渲染的颜色图
-            - "normal": (B,V,H,W,3) 法线图
-            - "depth": (B,V,H,W,1) 深度图
+        dict: Rendered output, including:
+            - "color": (B,V,H,W,3) Rendered colormap
+            - "normal": (B,V,H,W,3) normal map
+            - "depth": (B,V,H,W,1) Depth map
             - "meshes": list[len=B] of MeshExtractResult
     """
-    # ---- 解码 ----
+    # ---- Decode ----
     outputs = pipeline.sparse.decode(latents, formats=['mesh'])  # dict
     meshes = outputs['mesh']  # list[len=B] of MeshExtractResult
 
-    # ---- 获取相机参数 ----
+    # ---- Get camera parameters ----
     extr_all = cameras.w2c.to(device)  # (B,V,4,4)
     intr_all = cameras.intrinsics.to(device)  # (B,V,3,3)
     batch_size, num_views = extr_all.shape[:2]  # (), ()
 
-    # ---- 逐样本逐视角渲染 ----
+    # ---- Sample-by-sample, per-view rendering ----
     all_renders: Dict[str, List[torch.Tensor]] = {}
 
     for i, mesh in enumerate(meshes):
@@ -74,7 +74,7 @@ def decode_and_render_mesh(
             ext_iv = extr_all[i, v]  # (4,4)
             intr_iv = intr_all[i, v]  # (3,3)
 
-            # Mesh 渲染器返回 RenderOutput
+            # Mesh renderer returns RenderOutput
             render_out = renderer.render(mesh, ext_iv, intr_iv)  # RenderOutput
             render_dict = {
                 "color": render_out.color,  # (H,W,3)
@@ -88,22 +88,22 @@ def decode_and_render_mesh(
                     continue
                 view_renders.setdefault(k, []).append(val)  # (H,W,C) or (H,W)
 
-        # 堆叠视角维度: list[V] of (H,W,C) -> (V,H,W,C)
+        # stacked view dimensions: list[V] of (H,W,C) -> (V,H,W,C)
         for k, v_list in view_renders.items():
             stacked = torch.stack(v_list, dim=0)  # (V,H,W,C)
             all_renders.setdefault(k, []).append(stacked)
 
-    # 堆叠 batch 维度: list[B] of (V,H,W,C) -> (B,V,H,W,C)
+    # stack batch Dimensions: list[B] of (V,H,W,C) -> (B,V,H,W,C)
     result: Dict[str, Any] = {}
     for k, b_list in all_renders.items():
         result[k] = torch.stack(b_list, dim=0)  # (B,V,H,W,C)
 
-    result["meshes"] = meshes  # 保留 mesh 供导出
+    result["meshes"] = meshes  # Reserve mesh for export
     return result
 
 
 # =====================================================================
-# 渲染工具函数 - Gaussian Splatting 渲染
+# Rendering tool functions - Gaussian Splatting rendering
 # =====================================================================
 
 def decode_and_render_gs(
@@ -114,30 +114,30 @@ def decode_and_render_gs(
     device: torch.device,
 ) -> Dict[str, Any]:
     """
-    解码潜变量为 Gaussian Splatting 并渲染多视角图像。
+    The decoded latent variable is Gaussian Splatting and render multi-view images.
 
     Args:
-        latents: SparseTensor, rollout 输出的稀疏特征
-        cameras: TrellisState.Cameras, 相机参数容器
-        pipeline: 生成 pipeline，提供 decode 方法
-        renderer: GS 渲染器实例
-        device: 运行设备
+        latents: SparseTensor, rollout Output sparse features
+        cameras: TrellisState.Cameras, Camera parameter container
+        pipeline: generate pipeline, provide decode method
+        renderer: GS Renderer instance
+        device: Run the device
 
     Returns:
-        dict: 渲染输出，包含：
-            - "color": (B,V,H,W,3) 渲染的颜色图
-            - "gaussians": list[len=B] of Gaussian 对象
+        dict: Rendered output, including:
+            - "color": (B,V,H,W,3) Rendered colormap
+            - "gaussians": list[len=B] of Gaussian object
     """
-    # ---- 解码 ----
+    # ---- Decode ----
     outputs = pipeline.sparse.decode(latents, formats=['gaussian'])  # dict
     gaussians = outputs['gaussian']  # list[len=B] of Gaussian
 
-    # ---- 获取相机参数 ----
+    # ---- Get camera parameters ----
     extr_all = cameras.w2c.to(device)  # (B,V,4,4)
     intr_all = cameras.intrinsics.to(device)  # (B,V,3,3)
     _, num_views = extr_all.shape[:2]  # (), ()
 
-    # ---- 逐样本逐视角渲染 ----
+    # ---- Sample-by-sample, per-view rendering ----
     all_colors: List[torch.Tensor] = []
 
     for i, gs in enumerate(gaussians):
@@ -147,25 +147,25 @@ def decode_and_render_gs(
             ext_iv = extr_all[i, v]  # (4,4)
             intr_iv = intr_all[i, v]  # (3,3)
 
-            # GS 渲染器返回 RenderOutput
+            # GS renderer returns RenderOutput
             render_out = renderer.render(gs, ext_iv, intr_iv)  # RenderOutput
             color = render_out.color  # (H,W,3)
             view_colors.append(color)
 
-        # 堆叠视角维度: list[V] of (H,W,C) -> (V,H,W,C)
+        # stacked view dimensions: list[V] of (H,W,C) -> (V,H,W,C)
         stacked = torch.stack(view_colors, dim=0)  # (V,H,W,C)
         all_colors.append(stacked)
 
-    # 堆叠 batch 维度: list[B] of (V,H,W,C) -> (B,V,H,W,C)
+    # stack batch Dimensions: list[B] of (V,H,W,C) -> (B,V,H,W,C)
     result: Dict[str, Any] = {
         "color": torch.stack(all_colors, dim=0),  # (B,V,H,W,C)
-        "gaussians": gaussians,  # 保留 GS 供其他用途
+        "gaussians": gaussians,  # Reserve GS for other purposes
     }
     return result
 
 
 # =====================================================================
-# 前向传播 - 共享的 Trellis 前向逻辑
+# forward propagation - shared Trellis forward logic
 # =====================================================================
 
 def trellis_forward(
@@ -177,37 +177,37 @@ def trellis_forward(
     is_training: bool = True,
 ) -> Dict[str, Any]:
     """
-    Trellis 前向传播：Dense Sampling → Rollout → Decode → Render
+    Trellis Forward propagation:Dense Sampling → Rollout → Decode → Render
 
-    抽取共享的前向逻辑，供训练、评估和流水线并行版本复用。
+    Extract shared forward logic for reuse by training, evaluation, and pipelined parallel versions.
 
-    注意：调用此函数时需要在外层使用 TrainModeGuard（训练时）或 EvalModeGuard（评估时）。
+    Note: When calling this function, it needs to be used in the outer layer TrainModeGuard(during training) or EvalModeGuard(at the time of evaluation).
 
     Args:
-        system: 系统组件（pipeline、renderer）
-        state: TrellisState 状态对象（已挂载 batch 数据，含条件编码）
-        cfg: 配置对象
-        device: 运行设备
-        global_step: 全局步数（用于随机种子）
-        is_training: 是否为训练模式
+        system: system components (pipeline,renderer)
+        state: TrellisState status object (mounted batch data, including conditional encoding)
+        cfg: Configuration object
+        device: Run the device
+        global_step: global steps (for random seed)
+        is_training: Whether it is training mode
 
     Returns:
-        render_out: 渲染输出字典，包含：
-            - "color": (B,V,H,W,C) 渲染图像
-            - "meshes" 或 "gaussians": 3D 表示（用于导出）
+        render_out: Render output dictionary, containing:
+            - "color": (B,V,H,W,C) render image
+            - "meshes" or "gaussians": 3D Representation (for export)
 
     Side Effects:
-        - state.coords: 挂载稀疏坐标
-        - state.stage2.reg_loss: 挂载 reg_loss
-        - state.views_generated.image_tensor: 挂载渲染图像
+        - state.coords: Mount sparse coordinates
+        - state.stage2.reg_loss: mount reg_loss
+        - state.views_generated.image_tensor: Mount rendered image
     """
     pipeline = system.pipeline
 
-    # 评估时使用固定种子（确保可复现），训练时按 step 变化
+    # Use a fixed seed when evaluating (to ensure reproducibility), and press step change
     _seed = int(cfg.seed) if not is_training else int(cfg.seed) + global_step
 
-    # ---- 1. Dense Sampling（结构生成）----
-    # 如果 state.coords 已经预计算（例如 teacher 复用 student 的 coords），则跳过
+    # ---- 1. Dense Sampling(structure generation)----
+    # if state.coords Already precomputed (e.g. teacher Reuse student of coords), then skip
     if state.coords is None:
         generator_dense = torch.Generator(device='cpu').manual_seed(_seed)
         with torch.no_grad():
@@ -217,7 +217,7 @@ def trellis_forward(
             state.stage1.z0, batch_size=batch_size,
         )  # (B*T, 4)
 
-    # ---- 2. Rollout：执行稀疏特征采样（挂载 state.stage2.z0 和 state.stage2.reg_loss）----
+    # ---- 2. Rollout: Perform sparse feature sampling (mount state.stage2.z0 and state.stage2.reg_loss)----
     generator = torch.Generator(device=device).manual_seed(_seed)
 
     rollout_sparse(
@@ -225,14 +225,14 @@ def trellis_forward(
         generator=generator,
         is_training=is_training,
     )
-    latents = state.stage2.z0  # SparseTensor (挂载于 rollout)
+    latents = state.stage2.z0  # SparseTensor (mounted on rollout)
 
-    # 释放 rollout 阶段产生的显存碎片，为 decode 腾出空间
+    # release rollout The video memory fragments generated during the stage are decode make room
     torch.cuda.empty_cache()
 
-    # ---- 3. 解码 & 渲染 ----
+    # ---- 3. Decode & rendering ----
     renderer_type = cfg.renderer.type
-    renderer = system.renderers[renderer_type]  # 从 renderers dict 查找
+    renderer = system.renderers[renderer_type]  # from renderers dict Find
 
     if renderer_type == "gs":
         render_out = decode_and_render_gs(
@@ -244,13 +244,13 @@ def trellis_forward(
         )  # dict with "color"/"normal"/"depth": (B,V,H,W,C), "meshes": list
         render_out["color"] = render_out["normal"]
 
-    state.views_generated.image_tensor = render_out["color"]  # (B,V,H,W,C) 挂载生成图用于可视化
+    state.views_generated.image_tensor = render_out["color"]  # (B,V,H,W,C) Mount generated graph for visualization
 
     return render_out
 
 
 # =====================================================================
-# 评估 - 推理与可视化保存
+# Assessment - Reasoning and visual preservation
 # =====================================================================
 
 @torch.no_grad()
@@ -264,51 +264,51 @@ def evaluate(
     visuals_eval_dir: Path,
 ) -> Dict[str, Any]:
     """
-    评估函数：执行推理并保存可视化结果。
+    Evaluate function: perform inference and save visualization results.
 
-    完整的评估流程：
-    1. 从图像提取条件编码
-    2. 执行 Dense Sampling 生成稀疏结构
-    3. 执行 Sparse Sampling 生成特征
-    4. 解码为 3D 表示（mesh 或 GS）
-    5. 渲染多视角图像并保存
-    6. 导出 mesh 文件
+    Complete evaluation process:
+    1. Extract conditional encoding from image
+    2. execute Dense Sampling generate sparse structures
+    3. execute Sparse Sampling Generate features
+    4. Decoded as 3D means (mesh or GS)
+    5. Render multi-view images and save them
+    6. Export mesh File
 
-    注意：推理时通过 inference_context() 剥离 DDP 包装，
-        使 pipeline 直接使用原始模型（与官方 TRELLIS 推理路径一致）。
+    Note: passed during reasoning inference_context() peel off DDP packaging,
+        make pipeline Use the original model directly (with the official TRELLIS The reasoning path is consistent).
 
     Args:
-        system: 系统组件
-        cfg: 配置对象
-        accelerator: Accelerate 加速器
-        epoch: 当前 epoch
-        global_step: 全局步数
-        eval_loader: 评估数据加载器
-        visuals_eval_dir: 可视化输出目录
+        system: system components
+        cfg: Configuration object
+        accelerator: Accelerate accelerator
+        epoch: current epoch
+        global_step: global steps
+        eval_loader: Evaluate data loader
+        visuals_eval_dir: Visual output directory
 
     Returns:
-        dict: 评估日志字典
+        dict: Evaluation log dictionary
     """
     if eval_loader is None:
         return {}
 
-    # ---- 固定随机种子，确保每次评估结果可复现 ----
+    # ---- Fixed random seeds to ensure that each evaluation result is reproducible ----
     eval_seed = int(cfg.seed)
     torch.manual_seed(eval_seed)
     torch.cuda.manual_seed_all(eval_seed)
 
     pipeline = system.pipeline
-    # 获取采样参数
-    # evaluate 不直接使用采样参数（由 trellis_forward 内部获取）
+    # Get sampling parameters
+    # evaluate Sampling parameters are not used directly (by trellis_forward obtained internally)
 
-    # ---- 创建 TrellisVisualIO 用于保存 ----
+    # ---- create TrellisVisualIO for saving ----
     visual_io = TrellisVisualIO(visuals_eval_dir, target_h=cfg.renderer.resolution, accelerator=accelerator)
 
     # =====================================================
-    # 使用 EvalModeGuard 确保所有模型处于评估模式
+    # Use EvalModeGuard Make sure all models are in evaluation mode
     # =====================================================
     pipe_models = pipeline.pipe.models
-    # ★ 推理时换回无 DDP 包装的原始模型
+    # ★ Replace it with None when reasoning DDP original model of packaging
     inference_ctx = system.strategy.inference_context() if system.strategy else nullcontext()
 
     with inference_ctx, EvalModeGuard(
@@ -317,21 +317,21 @@ def evaluate(
         pipe_models['slat_decoder_gs'],
     ):
         # =====================================================
-        # 遍历评估数据集
+        # Iterate over the evaluation data set
         # =====================================================
         for batch_idx, batch in enumerate(eval_loader):
-            # 每个 batch 创建独立状态，避免跨 batch 残留
+            # each batch Create independent states to avoid crossing batch Residue
             state = TrellisState()
 
-            # ---- 挂载 batch 数据 ----
-            state.attach_batch(batch, pipeline=pipeline)  # 自动从 image_pils 生成条件编码并挂载
+            # ---- mount batch data ----
+            state.attach_batch(batch, pipeline=pipeline)  # automatically from image_pils Generate conditional encoding and mount
 
-            # ---- 使用共享的 trellis_forward 执行前向传播 ----
+            # ---- Use shared trellis_forward Perform forward pass ----
             render_out = trellis_forward(
                 system, state, cfg, accelerator.device, global_step, is_training=False
             )
 
-            # ---- 保存结果（所有进程都保存各自处理的样本）----
+            # ---- Save results (all processes save the samples they processed)----
             renderer_type = cfg.renderer.type
             visual_io.save_batch_eval(
                 state=state,

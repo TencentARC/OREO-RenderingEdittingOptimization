@@ -1,9 +1,9 @@
 """
-可视化 Mixin。
+Visualization Mixin.
 
-为 Tracker 提供中间步可视化能力：
-- decode_uniform_samples: 均匀采样并 decode 中间步
-- get_progress_grid: 生成 n×n 进度网格图
+for Tracker Provides intermediate step visualization capabilities:
+- decode_uniform_samples: Sample evenly and decode middle step
+- get_progress_grid: generate n×n Progress Grid Chart
 """
 
 from typing import List, Any
@@ -13,100 +13,100 @@ from PIL import Image
 
 class VisualizationMixin:
     """
-    可视化 Mixin - 提供中间步进度可视化。
-    
-    需要子类定义：
-    - x0_preds: List[torch.Tensor] 预测列表
-        - height, width: int 图像尺寸
+    Visualization Mixin - Provides visualization of intermediate step progress.
+
+    Requires subclass definition:
+    - x0_preds: List[torch.Tensor] Prediction list
+        - height, width: int Image size
     """
-    
-    # 子类需要定义这些字段
+
+    # Subclasses need to define these fields
     x0_preds: List[torch.Tensor]
     height: int
     width: int
     images: List[Image.Image]
-    
+
     @property
     def step_latents(self) -> List[torch.Tensor]:
-        """返回要可视化的 latent 列表，默认为 x0_preds"""
+        """Return to be visualized latent list, default is x0_preds"""
         return self.x0_preds
-    
+
     @property
     def has_images(self) -> bool:
-        """是否已 decode 图像"""
+        """Have you decode image"""
         return len(self.images) > 0
-    
+
     def decode_uniform_samples(self, pipe: Any, n_samples: int = 4) -> None:
         """
-        均匀采样 n_samples 个中间步进行并行 decode。
-        
+        uniform sampling n_samples Parallelize intermediate steps decode.
+
         Args:
-            pipe: Pipeline（需要 _decode_latent_to_image 方法）
-            n_samples: 采样步数，必须是完全平方数（4, 9, 16, ...）
-        
-        结果存储到 self.images。
+            pipe: Pipeline(Required _decode_latent_to_image method)
+            n_samples: The number of sampling steps must be a perfect square number (4, 9, 16, ...)
+
+        The results are stored in self.images.
         """
         K = len(self.step_latents)
         if K == 0:
             return
-        
-        # 计算均匀采样的索引
+
+        # Calculate the index of uniform sampling
         if n_samples >= K:
             indices = list(range(K))
             n_samples = K
         else:
             indices = [int(i * (K - 1) / (n_samples - 1)) for i in range(n_samples)]
-        
-        # 收集要 decode 的 latents
+
+        # collection decode of latents
         sampled_latents = [self.step_latents[i] for i in indices]
-        
-        # 固定为单张解码，避免 OOM
+
+        # Fixed to single frame decoding to avoid OOM
         max_batch = 1
-        
-        # 分批 decode
+
+        # in batches decode
         decoded_images = []
         with torch.no_grad():
             for start in range(0, n_samples, max_batch):
                 chunk_latents = torch.cat(
-                    sampled_latents[start : start + max_batch], 
+                    sampled_latents[start : start + max_batch],
                     dim=0
                 )  # [batch, seq_len, C]
                 chunk_images = pipe._decode_latent_to_image(
-                    chunk_latents, 
-                    self.height, 
-                    self.width, 
+                    chunk_latents,
+                    self.height,
+                    self.width,
                     "pil"
                 )
                 decoded_images.extend(chunk_images)
-        
+
         self.images = decoded_images
-    
+
     def get_progress_grid(self, pipe: Any, n_samples: int = 4) -> Image.Image:
         """
-        将 n_samples 张中间步图像合成一张 √n × √n 网格图。
-        
+        will n_samples Combine the intermediate images into one √n × √n Grid diagram.
+
         Args:
             pipe: Pipeline
-            n_samples: 采样步数，必须是完全平方数（4, 9, 16, ...）
-        
+            n_samples: The number of sampling steps must be a perfect square number (4, 9, 16, ...)
+
         Returns:
-            合成的网格 PIL Image
+            synthetic mesh PIL Image
         """
-        # 检查是否为完全平方数
+        # Check if it is a perfect square number
         grid_size = int(n_samples ** 0.5)
         assert grid_size * grid_size == n_samples, f"n_samples must be a perfect square, got {n_samples}"
-        
-        # Decode 中间步（如果还没 decode 或数量不对）
+
+        # Decode Intermediate step (if not already decode or the quantity is wrong)
         if not self.has_images or len(self.images) != n_samples:
             self.decode_uniform_samples(pipe, n_samples)
-        
-        # 合成网格
+
+        # synthetic mesh
         img_w, img_h = self.images[0].size
         grid_img = Image.new("RGB", (img_w * grid_size, img_h * grid_size), (255, 255, 255))
-        
+
         for i, img in enumerate(self.images):
             row = i // grid_size
             col = i % grid_size
             grid_img.paste(img, (col * img_w, row * img_h))
-        
+
         return grid_img

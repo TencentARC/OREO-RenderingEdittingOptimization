@@ -1,17 +1,17 @@
 """
-Trellis reference pipeline 适配器（统一使用 SparseTensor）。
+Trellis reference pipeline Adapter (used uniformly SparseTensor).
 
-仅依赖 _reference_codes/TRELLIS 下的 TrellisImageTo3DPipeline，
-并对齐 oreo/systems/trellis.py 期望的接口：
-- dense_sampling: 生成稀疏结构 coords，返回形状 (T,4)，外部可扩 batch。
-- init_sparse_latents: 生成初始 SparseTensor latent（feats 形状 (N,C)）。
- - scheduler: 提供 set_timesteps/step，基于 FlowEuler 的公式，输入输出均为 SparseTensor。
-- sparse_sampling_step: 单步预测 v（SparseTensor），支持 CFG。
-- prepare_image_conditions: 预处理图像并生成 cond/neg_cond。
-- backend.tokens_to_sparse: 直接返回 SparseTensor。
-- precompute_cache: 占位直接回传。
+only depends on _reference_codes/TRELLIS down TrellisImageTo3DPipeline,
+and align oreo/systems/trellis.py Expected interface:
+- dense_sampling: generate sparse structures coords, returns the shape (T,4), externally expandable batch.
+- init_sparse_latents: Generate initial SparseTensor latent(feats shape (N,C)).
+ - scheduler: provide set_timesteps/step, based on FlowEuler The formula of , the input and output are both SparseTensor.
+- sparse_sampling_step: single step prediction v(SparseTensor), support CFG.
+- prepare_image_conditions: Preprocess the image and generate cond/neg_cond.
+- backend.tokens_to_sparse: Return directly SparseTensor.
+- precompute_cache: The placeholder is returned directly.
 
-注意：所有张量操作行均按用户要求添加形状注释。
+NOTE: All tensor operation lines are annotated with shape as required by the user.
 """
 
 import os
@@ -34,16 +34,16 @@ from oreo.generators.trellis.scheduler import TrellisFlowScheduler
 
 def build_pipeline_from_reference(cfg: Any, accelerator: Any, device: Optional[torch.device] = None) -> Any:
     """
-    构建参考 Trellis pipeline 的适配器实例。
-    
+    Build reference Trellis pipeline Adapter instance.
+
     Args:
-        cfg: 配置对象
-        accelerator: Accelerate 加速器
-        device: 可选，指定模型加载的设备。如果不指定，使用 accelerator.device
+        cfg: Configuration object
+        accelerator: Accelerate accelerator
+        device: Optional, specify the device to load the model from. If not specified, use accelerator.device
     """
-    project_root = torch.__file__  # 占位以便 mypy，实际下方重置
-    # 将 _reference_codes/TRELLIS 加入 sys.path
-    project_root = sys.argv[0]  # 仅占位防静态检查告警
+    project_root = torch.__file__  # place a place for mypy, actually reset below
+    # will _reference_codes/TRELLIS Join sys.path
+    project_root = sys.argv[0]  # Only occupy space to prevent static check alarms
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
     trellis_ref_root = os.path.join(repo_root, "_reference_codes", "TRELLIS")
     if trellis_ref_root not in sys.path:
@@ -53,25 +53,25 @@ def build_pipeline_from_reference(cfg: Any, accelerator: Any, device: Optional[t
         sys.path.insert(0, triposf_ref_root)
 
 
-    # 设置默认 CUDA 设备（支持传入自定义设备用于流水线并行）
+    # Set default CUDA Device (supports passing in custom devices for pipeline parallelism)
     if device is None:
         device = accelerator.device
     if device.type == "cuda":
-        # 确保设备有具体索引
+        # Make sure the device has a specific index
         if device.index is None:
             device = torch.device("cuda:0")
         torch.cuda.set_device(device)
-    
+
     pipe_raw = TrellisImageTo3DPipeline.from_pretrained(cfg.pretrained.model)
     pipe_raw.to(device)
-    # 注意：不再调用 pipe_raw.cuda()，因为它会覆盖设备设置为 GPU 0
+    # Note: no longer called pipe_raw.cuda(), as it overrides the device setting to GPU 0
     os.environ["TRELLIS_VERBOSE"] = "1" if bool(getattr(cfg, "verbose", False)) else "0"
 
     return TrellisRefAdapter(pipe_raw, FlowEulerSampler=FlowEulerSampler)
 
 
 # =====================================================================
-# 共享工具
+# Sharing tools
 # =====================================================================
 
 def _scale_timesteps(
@@ -80,9 +80,9 @@ def _scale_timesteps(
     device: torch.device,
 ) -> torch.Tensor:
     """
-    将 [0,1] 范围的时间步缩放为模型期望的 [0,1000] 范围。
+    will [0,1] The range of time steps is scaled to what the model expects [0,1000] range.
 
-    支持标量 float / 0-dim Tensor / (B,) Tensor 输入。
+    Supports scalars float / 0-dim Tensor / (B,) Tensor Enter.
     """
     if torch.is_tensor(timesteps):
         if timesteps.dim() == 0:
@@ -102,7 +102,7 @@ def _scale_timesteps(
 # =====================================================================
 
 class DenseStage:
-    """Stage 1 操作：dense Tensor (B, C, R, R, R)。"""
+    """Stage 1 Operation:dense Tensor (B, C, R, R, R)."""
 
     def __init__(self, adapter: "TrellisRefAdapter"):
         self._adapter = adapter
@@ -113,7 +113,7 @@ class DenseStage:
 
     def get_runtime_params(self) -> tuple[int, float, float, float, float]:
         """
-        返回 (steps, guidance, rescale_t, cfg_min, cfg_max)。
+        Return (steps, guidance, rescale_t, cfg_min, cfg_max).
         """
         ss_params = self.pipe.sparse_structure_sampler_params
         return (
@@ -125,7 +125,7 @@ class DenseStage:
         )
 
     def resolve_flow_module(self) -> Any:
-        """获取 sparse_structure_flow_model 原始模型（去除 DDP 包装）。"""
+        """get sparse_structure_flow_model original model (removed DDP packaging)."""
         model = self.pipe.models["sparse_structure_flow_model"]
         return model.module if hasattr(model, "module") else model
 
@@ -135,16 +135,16 @@ class DenseStage:
         batch_size: int = 1,
     ) -> torch.Tensor:
         """
-        将 Dense latent 解码为占位坐标。
+        will Dense latent Decoded into placeholder coordinates.
 
         z_s (B, C, R, R, R) → decoder → threshold > 0 → coords (B*T, 4) int32
 
         Args:
-            z_s: Dense rollout 输出的 latent (B, C, R, R, R)
-            batch_size: 用于 batch 索引扩展
+            z_s: Dense rollout Output latent (B, C, R, R, R)
+            batch_size: used for batch index expansion
 
         Returns:
-            coords: (B*T, 4) int32，列为 [batch_idx, x, y, z]
+            coords: (B*T, 4) int32, listed as [batch_idx, x, y, z]
         """
         decoder = self.pipe.models['sparse_structure_decoder']
         coords = torch.argwhere(decoder(z_s) > 0)[:, [0, 2, 3, 4]].int()  # (T, 4)
@@ -164,10 +164,10 @@ class DenseStage:
         batch_size: int,
         generator: Optional[torch.Generator] = None,
     ) -> torch.Tensor:
-        """生成 Dense 初始噪声 (B, C, R, R, R)。
+        """generate Dense initial noise (B, C, R, R, R).
 
-        与原生 sample_sparse_structure 保持一致：先在 CPU 上生成噪声，
-        再 .to(device)，以确保相同种子下数值完全相同。
+        with native sample_sparse_structure Be consistent: first in CPU Noise is generated on
+        Again .to(device), to ensure that the values under the same seed are exactly the same.
         """
         flow_model = self.resolve_flow_module()
         reso = flow_model.resolution  # 16
@@ -187,7 +187,7 @@ class DenseStage:
         uncond_embeddings: Optional[torch.Tensor] = None,
         guidance_scale: float = 0.0,
     ) -> torch.Tensor:
-        """Dense 单步 v 预测，返回 (B, C, R, R, R)。"""
+        """Dense single step v predict, return (B, C, R, R, R)."""
         model = self.pipe.models["sparse_structure_flow_model"]
         t_scaled = _scale_timesteps(timesteps, x_t.shape[0], x_t.device)
         return model(x_t, t_scaled, cond_embeddings)  # (B, C, R, R, R)
@@ -198,10 +198,10 @@ class DenseStage:
         rescale_t: float,
     ) -> Tuple[np.ndarray, list]:
         """
-        时间步序列生成。
+        Time step sequence generation.
 
         Returns:
-            (t_seq, t_pairs): t_seq 为 (steps+1,)，t_pairs 为 [(t, t_prev), ...]
+            (t_seq, t_pairs): t_seq for (steps+1,),t_pairs for [(t, t_prev), ...]
         """
         t_seq = np.linspace(1, 0, steps + 1)
         t_seq = rescale_t * t_seq / (1 + (rescale_t - 1) * t_seq)
@@ -214,7 +214,7 @@ class DenseStage:
 # =====================================================================
 
 class SparseStage:
-    """Stage 2 操作：SparseTensor (feats: (N, C), coords: (N, 4))。"""
+    """Stage 2 Operation:SparseTensor (feats: (N, C), coords: (N, 4))."""
 
     def __init__(self, adapter: "TrellisRefAdapter"):
         self._adapter = adapter
@@ -225,7 +225,7 @@ class SparseStage:
 
     def get_runtime_params(self) -> tuple[int, float, float, float, float, float]:
         """
-        返回 (steps, guidance, rescale_t, cfg_min, cfg_max, mc_threshold)。
+        Return (steps, guidance, rescale_t, cfg_min, cfg_max, mc_threshold).
         """
         slat_params = self.pipe.slat_sampler_params
         return (
@@ -238,7 +238,7 @@ class SparseStage:
         )
 
     def resolve_flow_module(self) -> Any:
-        """获取 slat_flow_model 原始模型（去除 DDP 包装）。"""
+        """get slat_flow_model original model (removed DDP packaging)."""
         model = self.pipe.models["slat_flow_model"]
         return model.module if hasattr(model, "module") else model
 
@@ -248,7 +248,7 @@ class SparseStage:
         in_channels: int,
         generator: Optional[torch.Generator] = None,
     ) -> Any:
-        """生成初始 SparseTensor latent (feats: (N, C))。"""
+        """Generate initial SparseTensor latent (feats: (N, C))."""
         feats = torch.randn(
             coords.shape[0],
             int(in_channels),
@@ -267,17 +267,17 @@ class SparseStage:
         guidance_scale: float = 0.0,
     ) -> Any:
         """
-        Sparse 单步 v 预测，返回 SparseTensor。
+        Sparse single step v predict, return SparseTensor.
 
-        模型期望 t ∈ [0, 1000]，外部传入 [0, 1]，内部缩放。
-        CFG 由外部处理。
+        model expectations t ∈ [0, 1000], external input [0, 1], internal scaling.
+        CFG Handled externally.
         """
         model = self.pipe.models["slat_flow_model"]
         t_scaled = _scale_timesteps(timesteps, cond_embeddings.shape[0], x_t_sparse.device)
         return model(x_t_sparse, t_scaled, cond_embeddings)
 
     def scheduler(self) -> TrellisFlowScheduler:
-        """返回 Trellis Flow Matching 调度器。"""
+        """Return Trellis Flow Matching scheduler."""
         return TrellisFlowScheduler()
 
     def decode(
@@ -285,23 +285,23 @@ class SparseStage:
         latents: Any,
         formats: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """统一封装 decode_slat。"""
+        """Unified packaging decode_slat."""
         fmt = formats if formats is not None else ["mesh"]
         return self.pipe.decode_slat(latents, formats=fmt)
 
 
 # =====================================================================
-# TrellisRefAdapter — 组合 + 通用工具
+# TrellisRefAdapter — combination + general tools
 # =====================================================================
 
 class TrellisRefAdapter:
     """
-    适配 TrellisImageTo3DPipeline，提供 .dense 和 .sparse 子对象。
+    adapt TrellisImageTo3DPipeline, provide .dense and .sparse sub-object.
 
-    用法:
+    Usage:
         pipeline.dense.sampling_step(...)   # Stage 1
         pipeline.sparse.sampling_step(...)  # Stage 2
-        pipeline.prepare_image_conditions(...)  # 通用
+        pipeline.prepare_image_conditions(...)  # Universal
     """
 
     def __init__(self, pipe_raw: Any, FlowEulerSampler: Any):
@@ -310,34 +310,34 @@ class TrellisRefAdapter:
         self.dense = DenseStage(self)
         self.sparse = SparseStage(self)
 
-    # === 兼容入口 ===
+    # === Compatible entrance ===
 
     def get_sampler_runtime_params(self) -> tuple[int, float, int, float, float, float]:
         """
-        兼容入口：返回 (ss_steps, ss_guidance, slat_steps, slat_guidance, slat_rescale_t, slat_mc_threshold)。
+        Compatible entry: return (ss_steps, ss_guidance, slat_steps, slat_guidance, slat_rescale_t, slat_mc_threshold).
         """
         ss_steps, ss_guidance, _, _, _ = self.dense.get_runtime_params()
         slat_steps, slat_guidance, slat_rescale_t, _, _, slat_mc_threshold = self.sparse.get_runtime_params()
         return ss_steps, ss_guidance, slat_steps, slat_guidance, slat_rescale_t, slat_mc_threshold
 
-    # === 条件 / 图像 ===
+    # === Conditions / image ===
 
     def prepare_image_conditions(self, images: List[Any]) -> Dict[str, Any]:
-        """预处理图像并生成 cond/neg_cond。"""
+        """Preprocess the image and generate cond/neg_cond."""
         images_proc = [self.pipe.preprocess_image(img) for img in images]
         cond_dict = self.pipe.get_cond(images_proc)
 
         cond = cond_dict.get("cond")
         if cond is None:
-            raise ValueError("prepare_image_conditions: get_cond 返回的 cond 为空。")
+            raise ValueError("prepare_image_conditions: get_cond returned cond is empty.")
         neg_cond = cond_dict.get("neg_cond", torch.zeros_like(cond))  # (B, S, C)
 
         return {"cond": cond, "neg_cond": neg_cond}
 
-    # === Mesh 导出 ===
+    # === Mesh Export ===
 
     def export_mesh_obj(self, mesh: Any, out_path: str) -> None:
-        """导出 MeshExtractResult 为 OBJ。"""
+        """Export MeshExtractResult for OBJ."""
         if mesh is None:
             return
         mesh_np = trimesh.Trimesh(
@@ -348,11 +348,11 @@ class TrellisRefAdapter:
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         mesh_np.export(out_path)
 
-    # === LoRA 控制 ===
+    # === LoRA control ===
 
     @contextmanager
     def disable_lora_context(self, model_key: str = "slat_flow_model"):
-        """临时禁用指定模型的 LoRA 适配器。"""
+        """Temporarily disable the specified model LoRA adapter."""
         raw = self.pipe.models[model_key]
         model = raw.module if hasattr(raw, "module") else raw
         if hasattr(model, 'disable_adapters'):

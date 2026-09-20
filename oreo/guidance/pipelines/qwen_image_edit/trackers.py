@@ -19,29 +19,29 @@ from ..utils import (
 
 
 # =============================================================================
-# StateTracker - 统一状态追踪器
+# StateTracker - Unified status tracker
 # =============================================================================
 
 @dataclass
 class StateTracker(BaseStateTracker, LossMixin, VisualizationMixin, BaseNoiseMixin):
     """
-    统一状态追踪器（random / fixed / aligned / delta 模式）。
-    
-    存储：
-    - x0_preds: 预测的 x0（MSE loss 目标）
-    - x0_pos: CSD 正样本（高 CFG x0 预测，吸引）
-    - x0_neg: CSD 负样本（低 CFG x0 预测，排斥）
-    - ts: 时间步列表
-    
-    通过 mse_weight / csd_weight 控制 loss 类型：
-    - mse_weight=1 → 纯 MSE: MSE(src, x0_pred)
-    - csd_weight=1 → 纯 CSD: MSE(src, x0_pos) - MSE(src, x0_neg)
-    
-    噪声模式：
-    - random / fixed / aligned: 见 BaseNoiseMixin
-    - delta: 双分支差分补偿 ε -= v_delta * dt，update() 时需传入 v_delta 和 dt
-    
-    使用方式：
+    Unified Status Tracker (random / fixed / aligned / delta mode).
+
+    Storage:
+    - x0_preds: Predictive x0(MSE loss target)
+    - x0_pos: CSD Positive sample (high CFG x0 predict, attract)
+    - x0_neg: CSD Negative samples (low CFG x0 prediction, rejection)
+    - ts: time step list
+
+    Pass mse_weight / csd_weight control loss Type:
+    - mse_weight=1 → pure MSE: MSE(src, x0_pred)
+    - csd_weight=1 → pure CSD: MSE(src, x0_pos) - MSE(src, x0_neg)
+
+    Noise pattern:
+    - random / fixed / aligned: see BaseNoiseMixin
+    - delta: Dual branch differential compensation ε -= v_delta * dt,update() Need to be passed in v_delta and dt
+
+    How to use:
         tracker = StateTracker(height=H, width=W)
         tracker.init(x_src, mode="aligned", seed=0)
         for t in timesteps:
@@ -52,77 +52,77 @@ class StateTracker(BaseStateTracker, LossMixin, VisualizationMixin, BaseNoiseMix
             x0_pos = z_t - t * v_cond
             x0_neg = z_t - t * v_uncond
             tracker.record(x0_pred, t, x0_pos, x0_neg)
-            tracker.update(v_cond, v_uncond, v_cfg, t, dt)  # delta 模式需传 v_delta=...
+            tracker.update(v_cond, v_uncond, v_cfg, t, dt)  # delta The mode needs to be passed v_delta=...
     """
-    
-    # 预测结果
-    x0_preds: List[torch.Tensor] = field(default_factory=list)    # MSE 目标
-    x0_pos: List[torch.Tensor] = field(default_factory=list)      # CSD 正样本（吸引）
-    x0_neg: List[torch.Tensor] = field(default_factory=list)      # CSD 负样本（排斥）
-    ts: List[float] = field(default_factory=list)                  # 时间步
-    
-    # 尺寸
+
+    # Prediction results
+    x0_preds: List[torch.Tensor] = field(default_factory=list)    # MSE target
+    x0_pos: List[torch.Tensor] = field(default_factory=list)      # CSD Positive sample (attract)
+    x0_neg: List[torch.Tensor] = field(default_factory=list)      # CSD Negative samples (exclusion)
+    ts: List[float] = field(default_factory=list)                  # time step
+
+    # Size
     height: int = None
     width: int = None
-    
-    # 可视化
+
+    # Visualization
     image: Image.Image = None
     images: List[Image.Image] = field(default_factory=list)
-    
-    # 噪声管理（BaseNoiseMixin）
+
+    # Noise Management (BaseNoiseMixin)
     _noise: Optional[torch.Tensor] = None
     _mode: NoiseMode = "fixed"
-    
+
     # =========================================================================
-    # 记录方法
+    # Recording method
     # =========================================================================
-    
+
     def record(
-        self, 
+        self,
         x0_pred: torch.Tensor,
         t: float,
         x0_pos: torch.Tensor,
         x0_neg: torch.Tensor,
     ) -> None:
         """
-        记录一步状态。
-        
+        Record the status of a step.
+
         Args:
-            x0_pred: [B, seq, C] 预测的 x0（MSE 目标）
-            t: 当前时间步
-            x0_pos: [B, seq, C] CSD 正样本（高 CFG x0 预测，吸引）
-            x0_neg: [B, seq, C] CSD 负样本（低 CFG x0 预测，排斥）
+            x0_pred: [B, seq, C] Predictive x0(MSE target)
+            t: current time step
+            x0_pos: [B, seq, C] CSD Positive sample (high CFG x0 predict, attract)
+            x0_neg: [B, seq, C] CSD Negative samples (low CFG x0 prediction, rejection)
         """
         self.x0_preds.append(x0_pred.detach().clone())  # [B, seq, C]
         self.x0_pos.append(x0_pos.detach().clone())  # [B, seq, C]
         self.x0_neg.append(x0_neg.detach().clone())  # [B, seq, C]
         self.ts.append(t)
-    
+
     # =========================================================================
-    # 属性
+    # Properties
     # =========================================================================
-    
+
     @property
     def target(self) -> torch.Tensor:
-        """目标 latent [B, seq, C]，返回最后一个 x0_pred"""
+        """target latent [B, seq, C], return the last x0_pred"""
         if not self.x0_preds:
             return None
         return self.x0_preds[-1]  # [B, seq, C]
-    
+
     @property
     def num_steps(self) -> int:
-        """返回记录的步数"""
+        """Returns the number of recorded steps"""
         return len(self.x0_preds)
-    
+
     @property
     def final(self) -> torch.Tensor:
-        """target 的别名"""
+        """target alias"""
         return self.target
-    
+
     def stack(self) -> torch.Tensor:
-        """堆叠所有 x0_pred [K, B, seq, C]"""
+        """stack all x0_pred [K, B, seq, C]"""
         return torch.stack(self.x0_preds, dim=0)  # [K, B, seq, C]
-    
+
     def __len__(self) -> int:
         return len(self.x0_preds)
 

@@ -1,8 +1,8 @@
 """
-基础类定义。
+Base class definition.
 
-包含:
-- BaseStateTracker: 状态追踪器基类
+contains:
+- BaseStateTracker: Status tracker base class
 """
 
 from dataclasses import dataclass
@@ -14,33 +14,33 @@ from PIL import Image
 @dataclass
 class BaseStateTracker:
     """
-    状态追踪器基类。
-    
-    所有 Guidance 方法的 Tracker（FlowEdit、CSD、SDS）都继承此类。
-    
-    共有属性：
-        - height, width: 图像尺寸（用于 decode）
-    
-    子类应通过 Mixin 或直接实现提供：
-        - target: 目标 latent（用于 loss 计算）
-        - loss(): 主要 loss 计算方法（由 LossMixin 提供）
+    Status tracker base class.
+
+    all Guidance methodological Tracker(FlowEdit,CSD,SDS) all inherit this class.
+
+    Common attributes:
+        - height, width: Image size (for decode)
+
+    Subclasses should pass Mixin Or a direct implementation provides:
+        - target: target latent(for loss calculation)
+        - loss(): main loss Calculation method (by LossMixin provided)
     """
-    
+
     height: int = 0
     width: int = 0
-    
+
     # =========================================================================
-    # 共有方法
+    # shared methods
     # =========================================================================
-    
+
     def _decode_latent(self, pipe: Any, latent: torch.Tensor) -> Optional[Image.Image]:
         """
-        Decode 单个 latent 为图像。
-        
+        Decode single latent for images.
+
         Args:
-            pipe: Pipeline（需要 _decode_latent_to_image 方法）
+            pipe: Pipeline(Required _decode_latent_to_image method)
             latent: [1, seq, C]
-        
+
         Returns:
             PIL Image
         """
@@ -52,28 +52,28 @@ class BaseStateTracker:
                 "pil"
             )
             return images[0] if images else None
-    
+
     def _concat_images_horizontal(self, *images: Image.Image) -> Optional[Image.Image]:
         """
-        水平拼接多张图像。
-        
+        Stitch multiple images horizontally.
+
         Args:
-            *images: PIL Image 列表
-        
+            *images: PIL Image list
+
         Returns:
-            拼接后的 PIL Image
+            spliced PIL Image
         """
         images = [img for img in images if img is not None]
         if not images:
             return None
-        
+
         total_width = sum(img.width for img in images)
         max_height = max(img.height for img in images)
-        
+
         combined = Image.new('RGB', (total_width, max_height))
         x_offset = 0
         for img in images:
             combined.paste(img, (x_offset, 0))
             x_offset += img.width
-        
+
         return combined

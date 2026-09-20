@@ -1,17 +1,17 @@
 """
-Trellis 系统工厂 — 构建 Pipeline、Renderer、Strategy、Guidance、Optimizer。
+Trellis system factory — build Pipeline,Renderer,Strategy,Guidance,Optimizer.
 
-本模块仅包含：
-1. _CONFIG:           absl config_flags 配置入口
-2. build_system:      系统组件工厂函数
-3. build_dataloaders: 训练/评估 DataLoader 工厂
+This module only contains:
+1. _CONFIG:           absl config_flags Configuration entry
+2. build_system:      System component factory function
+3. build_dataloaders: training/Assessment DataLoader factory
 
-前向/渲染/评估逻辑见 forward.py；三阶段 Autograd 见 phases.py；
-训练入口见 entries/ 子目录。
+forward/rendering/For evaluation logic see forward.py;Three stages Autograd see phases.py;
+See you at the training entrance entries/ subdirectory.
 """
 
 # =====================================================================
-# 标准库导入
+# Standard library import
 # =====================================================================
 import os
 import random
@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple
 
 # =====================================================================
-# 第三方库导入
+# Third-party library import
 # =====================================================================
 import numpy as np
 import ml_collections
@@ -31,7 +31,7 @@ from accelerate import Accelerator
 from torch.utils.data import DataLoader
 
 # =====================================================================
-# TRELLIS / TripoSF 参考实现路径设置（必须在相关导入之前）
+# TRELLIS / TripoSF Reference implementation path settings (must be before related imports)
 # =====================================================================
 repo_root = os.path.abspath(os.getcwd())
 trellis_ref_root = os.path.join(repo_root, "_reference_codes", "TRELLIS")
@@ -42,7 +42,7 @@ if triposf_ref_root not in sys.path:
     sys.path.insert(0, triposf_ref_root)
 
 # =====================================================================
-# 项目内部导入
+# Import within project
 # =====================================================================
 from oreo.datasets.trellis import (
     TrellisDataConfig,
@@ -71,28 +71,28 @@ from oreo.generators.trellis.training_adpter import (
     TrellisFrozenStrategy,
 )
 
-# 使用 absl 的 config_flags 管理配置文件
+# Use absl of config_flags Manage configuration files
 _CONFIG = config_flags.DEFINE_config_file("config", help_string="Path to the config file.")
 
 
 # =====================================================================
-# TrellisSystem — Trellis v1 专用系统容器
+# TrellisSystem — Trellis v1 Dedicated system container
 # =====================================================================
 
 @dataclass
 class TrellisSystem:
     """
-    Trellis v1 系统核心组件容器。
+    Trellis v1 System core component container.
 
-    与 Trellis2System 平行的独立设计：
-    - pipeline:    共享生成管道
-    - renderers:   渲染器字典，按保留配置选择 mesh 或 gs
-    - guidance:    指导模块
-    - optimizer_sparse:   Sparse 优化器（slat_flow_model）
-    - optimizer_dense: Dense 优化器（sparse_structure_flow_model），仅 Dual-Stage 使用
-    - strategy:    训练策略（LoRA / Full / Frozen）
-    - cfg:         运行时配置（供 StageOps 查询）
-    - accelerator: Accelerate 加速器（供 StageOps 查询）
+    with Trellis2System Parallel independent design:
+    - pipeline:    Shared build pipeline
+    - renderers:   Renderer dictionary, selected by preserving configuration mesh or gs
+    - guidance:    Guidance module
+    - optimizer_sparse:   Sparse optimizer(slat_flow_model)
+    - optimizer_dense: Dense optimizer(sparse_structure_flow_model), only Dual-Stage Use
+    - strategy:    training strategy (LoRA / Full / Frozen)
+    - cfg:         Runtime configuration (for StageOps Query)
+    - accelerator: Accelerate accelerator (for StageOps Query)
     """
 
     pipeline: Any = None
@@ -100,16 +100,16 @@ class TrellisSystem:
     guidance: Any = None
     optimizer_sparse: Any = None
     optimizer_dense: Any = None
-    strategy: Any = None  # TrainingStrategy 实例
+    strategy: Any = None  # TrainingStrategy Example
     cfg: Any = None
     accelerator: Any = None  # Accelerator
 
     @staticmethod
     def setup_env_and_seed(cfg: Any) -> None:
         """
-        设置随机种子与确定性运行环境。
+        Set random seeds and deterministic running environment.
 
-        确保实验可复现性，设置以下随机源的种子：
+        To ensure experiment reproducibility, set the following random source seeds:
         - Python random / NumPy / PyTorch CPU+CUDA / cuDNN
         """
         seed = int(cfg.seed)
@@ -127,7 +127,7 @@ class TrellisSystem:
         load_path: Optional[str] = None,
         clone_from: Optional[str] = None,
     ) -> "TrellisSystem":
-        """准备 LoRA 适配器。"""
+        """Prepare LoRA adapter."""
         target_modules = [m for m in [self.pipeline, self.guidance] if hasattr(m, "set_adapter")]
         for module in target_modules:
             if load_path and hasattr(module, "load_adapter"):
@@ -137,15 +137,15 @@ class TrellisSystem:
 
     def prepare_models_and_optimizers(self, cfg: Any, accelerator: Accelerator) -> "TrellisSystem":
         """
-        通过 strategy.prepare_sparse() / prepare_dense() 注册模型到 DDP 并包装优化器。
+        Pass strategy.prepare_sparse() / prepare_dense() Register model to DDP and wrap the optimizer.
 
-        即使 optimizer 为 None（eval_only 模式），也需要调用 prepare
-        将模型注册到 accelerator，否则 accelerator.load_state() 无法恢复权重。
+        Even if optimizer for None(eval_only mode), also need to call prepare
+        Register the model to accelerator, otherwise accelerator.load_state() Unable to restore weight.
 
-        Sparse (slat_flow_model) 始终先 prepare。
-        Dense (sparse_structure_flow_model) 在配置启用 dense optimizer 时随后
-        prepare；eval_only 下即使 optimizer_dense 为 None 也必须注册模型，确保
-        Accelerate 的 flat checkpoint 顺序稳定为 model → model_1。
+        Sparse (slat_flow_model) always first prepare.
+        Dense (sparse_structure_flow_model) enable in configuration dense optimizer time later
+        prepare;eval_only even if next optimizer_dense for None The model must also be registered, ensuring
+        Accelerate of flat checkpoint The order is stable as model → model_1.
         """
         if accelerator is None:
             return self
@@ -159,8 +159,8 @@ class TrellisSystem:
 
 
 # =====================================================================
-# 向后兼容的 re-export
-# （外部脚本可能 from oreo.systems.trellis.system import trellis_forward 等）
+# backward compatible re-export
+# (External scripts may from oreo.systems.trellis.system import trellis_forward etc.)
 # =====================================================================
 from oreo.systems.trellis.forward import (  # noqa: F401
     decode_and_render_mesh,
@@ -171,38 +171,38 @@ from oreo.systems.trellis.forward import (  # noqa: F401
 
 
 # =====================================================================
-# build_system 公共子函数
+# build_system public subfunction
 # =====================================================================
 
 def _build_pipeline(cfg: ml_collections.ConfigDict, accelerator: Accelerator):
     """
-    构建 Pipeline（核心生成管道）。
+    build Pipeline(core build pipeline).
 
-    Pipeline 负责：条件编码、结构/特征采样、解码。
+    Pipeline Responsible for: conditional coding, structure/Feature sampling and decoding.
 
     Args:
-        cfg: 完整配置对象
-        accelerator: Accelerate 分布式训练加速器
+        cfg: Complete configuration object
+        accelerator: Accelerate Distributed training accelerator
 
     Returns:
-        构建好的 Pipeline 实例
+        built Pipeline Example
     """
     return build_pipeline_from_reference(cfg, accelerator)
 
 
 def _build_renderer_of_type(cfg: ml_collections.ConfigDict, device: str, renderer_type: str):
     """
-    按指定类型构建单个 Renderer。
+    Build a single of the specified type Renderer.
 
-    near/far 从 cfg.renderer.{renderer_type}.near/far 读取。
+    near/far from cfg.renderer.{renderer_type}.near/far Read.
 
     Args:
-        cfg: 完整配置对象（读取 renderer.resolution 等公共参数）
-        device: 设备字符串，如 "cuda:0"
-        renderer_type: "mesh" 或 "gs"
+        cfg: Full configuration object (read renderer.resolution and other public parameters)
+        device: Device string, such as "cuda:0"
+        renderer_type: "mesh" or "gs"
 
     Returns:
-        渲染器实例
+        Renderer instance
     """
     per_renderer = cfg.renderer[renderer_type]
     render_cfg = RenderConfig(
@@ -221,7 +221,7 @@ def _build_renderer_of_type(cfg: ml_collections.ConfigDict, device: str, rendere
 
 def _build_renderer(cfg: ml_collections.ConfigDict, device: str):
     """
-    向后兼容：按 cfg.renderer.type 构建单个 Renderer。
+    Backwards Compatibility: Press cfg.renderer.type Build a single Renderer.
     """
     return _build_renderer_of_type(cfg, device, cfg.renderer.type)
 
@@ -232,18 +232,18 @@ def _build_strategy(
     accelerator: Accelerator,
 ):
     """
-    构建 Strategy（训练策略：LoRA / Full / Frozen）。
+    build Strategy(Training strategy:LoRA / Full / Frozen).
 
-    Strategy 决定了参数冻结/解冻、学生/教师模型的放置方式。
-    训练和推理模式均需要调用。
+    Strategy Determined parameter freezing/thaw, student/How the teacher model is placed.
+    Both training and inference modes need to be called.
 
     Args:
-        cfg: 完整配置对象
-        pipeline: 已构建的 Pipeline 实例
-        accelerator: Accelerate 加速器
+        cfg: Complete configuration object
+        pipeline: Built Pipeline Example
+        accelerator: Accelerate accelerator
 
     Returns:
-        已 setup 的 Strategy 实例
+        Already setup of Strategy Example
     """
     train_mode = cfg.train.mode
     train_device = accelerator.device
@@ -275,31 +275,31 @@ def _build_training_components_sparse(
     guidance_factory: callable,
 ):
     """
-    构建 Sparse 训练组件：Guidance、Gradient Checkpointing、Sparse Optimizer。
+    build Sparse Training components:Guidance,Gradient Checkpointing,Sparse Optimizer.
 
-    如果 cfg.eval_only 为 True，返回 (None, None)。
+    if cfg.eval_only for True, return (None, None).
 
     Returns:
-        (guidance, optimizer_sparse) 元组
+        (guidance, optimizer_sparse) tuple
     """
     if cfg.eval_only:
         return None, None
 
-    # 1. 使用工厂函数创建 Guidance
+    # 1. Create using factory function Guidance
     guidance = guidance_factory(cfg.guidance, train_device=accelerator.device)
 
-    # 2. 启用 slat_flow_model 的 Gradient Checkpointing
+    # 2. enable slat_flow_model of Gradient Checkpointing
     slat_model = pipeline.sparse.resolve_flow_module()
     for block in slat_model.blocks:
         block.use_checkpoint = True
 
-    # 3. 也为 slat_decoder_gs 启用 Gradient Checkpointing
+    # 3. also for slat_decoder_gs enable Gradient Checkpointing
     decoder_gs = pipeline.pipe.models.get('slat_decoder_gs')
     if decoder_gs is not None and hasattr(decoder_gs, 'blocks'):
         for block in decoder_gs.blocks:
             block.use_checkpoint = True
 
-    # 4. 为 Sparse 学生模型创建优化器
+    # 4. for Sparse Student model creation optimizer
     optimizer_sparse = build_optimizer_for_sparse(strategy.student, cfg.train.optimizer)
 
     return guidance, optimizer_sparse
@@ -310,21 +310,21 @@ def _build_training_components_dense(
     pipeline,
 ):
     """
-    构建 Dense 训练组件：解冻参数、Gradient Checkpointing、Dense Optimizer。
+    build Dense Training component: unfreezing parameters,Gradient Checkpointing,Dense Optimizer.
 
-    仅在 cfg.train.dense_optimizer 为 True 时创建优化器，否则返回 None。
+    only in cfg.train.dense_optimizer for True Create an optimizer, otherwise return None.
 
     Returns:
-        optimizer_dense 或 None
+        optimizer_dense or None
     """
     if cfg.eval_only or not cfg.train.dense_optimizer:
         return None
 
     ss_model = pipeline.dense.resolve_flow_module()
-    # 解冻 Dense 模型参数
+    # Thaw Dense Model parameters
     for p in ss_model.parameters():
         p.requires_grad = True
-    # 启用 Gradient Checkpointing
+    # enable Gradient Checkpointing
     if hasattr(ss_model, 'blocks'):
         for block in ss_model.blocks:
             block.use_checkpoint = True
@@ -335,7 +335,7 @@ def _build_training_components_dense(
 
 
 # =====================================================================
-# 构建函数 - 系统组件工厂
+# Build function - System component factory
 # =====================================================================
 
 def build_system(
@@ -344,28 +344,28 @@ def build_system(
     guidance_factory: callable,
 ) -> TrellisSystem:
     """
-    构建完整的 Trellis 系统（编排入口）。
+    Build a complete Trellis System (orchestration entry).
 
-    依次调用各子函数构建：
+    Call each sub-function in turn to build:
     1. _build_pipeline   → Pipeline
-    2. _build_renderer   → Renderer（放入 renderers dict）
+    2. _build_renderer   → Renderer(Put in renderers dict)
     3. _build_strategy   → Strategy
     4. _build_training_components_sparse → Guidance + Sparse Optimizer
-    5. _build_training_components_dense  → Dense Optimizer（可选）
+    5. _build_training_components_dense  → Dense Optimizer(optional)
 
     Args:
-        cfg: 完整配置对象
-        accelerator: Accelerate 分布式训练加速器
-        guidance_factory: Guidance 工厂函数
+        cfg: Complete configuration object
+        accelerator: Accelerate Distributed training accelerator
+        guidance_factory: Guidance Factory function
 
     Returns:
-        TrellisSystem: 包含所有组件的系统实例
+        TrellisSystem: System instance containing all components
     """
     device = str(accelerator.device)
 
     pipeline = _build_pipeline(cfg, accelerator)
     renderer = _build_renderer(cfg, device)
-    renderer_key = cfg.renderer.type  # "mesh" 或 "gs"
+    renderer_key = cfg.renderer.type  # "mesh" or "gs"
     strategy = _build_strategy(cfg, pipeline, accelerator)
     guidance, optimizer_sparse = _build_training_components_sparse(
         cfg, pipeline, strategy, accelerator, guidance_factory,
@@ -390,30 +390,30 @@ def build_flowedit_system(
     guidance_factory: callable,
 ) -> TrellisSystem:
     """
-    构建 FlowEdit 训练系统 — Pretrained Rollout + Finetuned 单步去噪。
+    build FlowEdit training system — Pretrained Rollout + Finetuned Single step denoising.
 
-    与 build_system 相同，但确保：
-    - 使用 gs 渲染器（cfg.renderer.type = "gs"）
-    - decoder 不参与优化但保留计算图
+    with build_system Same, but make sure:
+    - Use gs renderer(cfg.renderer.type = "gs")
+    - decoder Does not participate in optimization but retains the calculation graph
 
     Args:
-        cfg: 完整配置对象
-        accelerator: Accelerate 分布式训练加速器
-        guidance_factory: Guidance 工厂函数
+        cfg: Complete configuration object
+        accelerator: Accelerate Distributed training accelerator
+        guidance_factory: Guidance Factory function
 
     Returns:
-        TrellisSystem: 系统实例
+        TrellisSystem: System instance
     """
     return build_system(cfg, accelerator, guidance_factory)
 
 
 def build_dataloaders(cfg: ml_collections.ConfigDict, accelerator: Accelerator) -> Tuple[DataLoader, DataLoader]:
     """
-    构造训练和评估的 DataLoader。
+    Construct training and evaluation DataLoader.
 
     Args:
-        cfg: 配置对象
-        accelerator: Accelerate 加速器
+        cfg: Configuration object
+        accelerator: Accelerate accelerator
 
     Returns:
         tuple: (train_loader, eval_loader)

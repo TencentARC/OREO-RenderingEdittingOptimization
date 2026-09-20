@@ -1,4 +1,4 @@
-"""CLIP 图像特征相似度 loss。"""
+"""CLIP Image feature similarity loss."""
 import logging
 from typing import Optional
 
@@ -12,16 +12,16 @@ from .base import BaseMetric
 
 class CLIPMetric(BaseMetric):
     """
-    CLIP 图像特征空间相似度 Metric。
-    
-    使用 CLIP Vision Encoder 提取图像级特征，计算余弦相似度，loss = 1 - similarity。
-    保持可导：rendered 保持梯度，target 无梯度。
-    
-    使用独立 CLIP 模型实现 retained FlowEdit metric。
+    CLIP Image feature space similarity Metric.
+
+    Use CLIP Vision Encoder Extract image-level features and calculate cosine similarity,loss = 1 - similarity.
+    Stay derivable:rendered Keep the gradient,target No gradient.
+
+    Use independent CLIP Model implementation retained FlowEdit metric.
     """
-    
+
     name = "clip"
-    
+
     def __init__(
         self,
         weight: float,
@@ -31,44 +31,44 @@ class CLIPMetric(BaseMetric):
         **kwargs,
     ):
         super().__init__(weight, device)
-        
+
         logging.info(f"[CLIPMetric] Loading CLIP: {model_path}")
         self.processor = CLIPProcessor.from_pretrained(model_path)
         self.model = CLIPModel.from_pretrained(model_path, torch_dtype=torch.float32).to(device).eval()
         for p in self.model.parameters():
             p.requires_grad = False
-        
-        # CLIP 归一化参数（OpenAI CLIP 标准值）
+
+        # CLIP Normalization parameters (OpenAI CLIP standard value)
         self.mean = torch.tensor([0.48145466, 0.4578275, 0.40821073], device=device).view(1, 3, 1, 1)  # (1,3,1,1)
         self.std = torch.tensor([0.26862954, 0.26130258, 0.27577711], device=device).view(1, 3, 1, 1)   # (1,3,1,1)
         self.size = image_size
         logging.info(f"[CLIPMetric] Initialized (weight={weight}, size={image_size})")
-    
+
     def compute(
         self,
-        rendered: torch.Tensor,  # (B,C,H,W) [0,1]，有梯度
-        target: torch.Tensor,    # (B,C,H,W) [0,1]，无梯度
+        rendered: torch.Tensor,  # (B,C,H,W) [0,1], with gradient
+        target: torch.Tensor,    # (B,C,H,W) [0,1], no gradient
         **kwargs,
     ) -> Optional[torch.Tensor]:
-        """计算 CLIP 图像特征相似度 loss。"""
-        # Resize（可导）
+        """Calculate CLIP Image feature similarity loss."""
+        # Resize(derivable)
         r = F.interpolate(rendered, size=(self.size, self.size), mode='bilinear', align_corners=False)  # (B,3,size,size)
         t = F.interpolate(target.detach(), size=(self.size, self.size), mode='bilinear', align_corners=False)  # (B,3,size,size)
-        
-        # CLIP 归一化（可导）
+
+        # CLIP Normalization (differentiable)
         r = (r - self.mean) / self.std  # (B,3,size,size)
         t = (t - self.mean) / self.std  # (B,3,size,size)
-        
-        # 提取图像级特征（rendered 保持梯度，target 无梯度）
+
+        # Extract image-level features (rendered Keep the gradient,target no gradient)
         feats_r = self.model.get_image_features(pixel_values=r)  # (B, D)
         with torch.no_grad():
             feats_t = self.model.get_image_features(pixel_values=t)  # (B, D)
-        
-        # 余弦相似度
+
+        # cosine similarity
         feats_r = F.normalize(feats_r, dim=-1)  # (B, D)
         feats_t = F.normalize(feats_t.detach(), dim=-1)  # (B, D)
         sim = (feats_r * feats_t).sum(dim=-1).mean()  # scalar
-        
+
         return 1 - sim  # loss
 
     @torch.no_grad()
@@ -78,7 +78,7 @@ class CLIPMetric(BaseMetric):
         target_pils: list[Image.Image],
         **kwargs,
     ) -> Optional[torch.Tensor]:
-        """PIL 输入路径，使用 CLIPProcessor 预处理。"""
+        """PIL Enter the path, use CLIPProcessor preprocessing."""
         r_inputs = self.processor(images=rendered_pils, return_tensors="pt", padding=True)
         t_inputs = self.processor(images=target_pils, return_tensors="pt", padding=True)
 
@@ -95,7 +95,7 @@ class CLIPMetric(BaseMetric):
         sim = (feats_r * feats_t).sum(dim=-1).mean()  # scalar
 
         return 1 - sim  # loss
-    
+
     def cleanup(self) -> None:
         if hasattr(self, 'model'):
             del self.model

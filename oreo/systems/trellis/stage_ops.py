@@ -1,15 +1,15 @@
 """
-Trellis v1 StageOps 具体实现 — 单阶段（SLAT Flow Model）。
+Trellis v1 StageOps Specific implementation — single stage (SLAT Flow Model).
 
-ABC (StageOps) 定义在 oreo.systems.utils.stage_ops，
-本文件提供 Trellis v1 特定的实现，使其可接入 autograd_template 编排模板。
+ABC (StageOps) defined in oreo.systems.utils.stage_ops,
+This document provides Trellis v1 Specific implementation to make it accessible autograd_template Arrange templates.
 
-实现：
-  TrellisOps      — 通用单阶段，根据 cfg.renderer.type 分发 mesh/gs 渲染
+Implementation:
+  TrellisOps      — Universal single stage, based on cfg.renderer.type Distribute mesh/gs rendering
 
-设计原则：
-  - FlowEdit/Contrastive Ops 复用 TrellisOps 的 rollout、render 和 VJP 基础设施
-  - vjp_loop 手动合并 reg_grads（适配 3-sub-step Phase 2）
+Design principles:
+  - FlowEdit/Contrastive Ops Reuse TrellisOps of rollout,render and VJP infrastructure
+  - vjp_loop Manual merge reg_grads(Adapt 3-sub-step Phase 2)
 """
 
 from __future__ import annotations
@@ -24,10 +24,10 @@ from PIL import Image
 
 from oreo.guidance.pipelines.utils.loss_functions import contrastive_loss_step
 
-# ABC 从 utils 导入（模型无关的抽象层）
+# ABC from utils Import (model-independent abstraction layer)
 from oreo.systems.utils.stage_ops import StageOps  # noqa: F401 — re-export
 
-# Phase 函数 & 渲染
+# Phase function & rendering
 from oreo.systems.trellis.forward import decode_and_render_mesh, decode_and_render_gs
 from oreo.systems.trellis.phases import phase3_rollout_grad_backward
 from oreo.generators.trellis.rollout import rollout_sparse, rollout_dense, RolloutTracker
@@ -39,31 +39,31 @@ from oreo.generators.trellis.rollout.base import (
 
 
 # =====================================================================
-# 通用实现 — 根据 cfg.renderer.type 分发
+# Generic implementation — According to cfg.renderer.type Distribute
 # =====================================================================
 
 class TrellisOps(StageOps):
     """
-    Trellis v1 单阶段 Ops — SLAT Flow Model。
+    Trellis v1 single stage Ops — SLAT Flow Model.
 
-    计算链：
+    Calculation chain:
       dense_sampling → rollout_sparse → decode_and_render_{mesh|gs} → guidance → VJP
 
-    Phase 2 保持 3-sub-step 显存优化：
+    Phase 2 keep 3-sub-step Video memory optimization:
       P2a: no_grad decode → detached comp_rgb
       P2b: guidance-only backward → rgb_grad
-      P2c: with-grad decode → backward(rgb_grad) → cond_proxy.grad（仅 guidance）
+      P2c: with-grad decode → backward(rgb_grad) → cond_proxy.grad(only guidance)
 
-    Phase 3 手动合并 reg_grads：
+    Phase 3 Manual merge reg_grads:
       v_grad = guidance_grad + reg_weight * reg_grad → VJP
     """
 
     # ═══════════════════════════════════════════════════════
-    # 配置查询
+    # Configure query
     # ═══════════════════════════════════════════════════════
 
     def get_model(self, system):
-        """返回 DDP 包装的 slat_flow_model。"""
+        """Return DDP packaged slat_flow_model."""
         return system.pipeline.pipe.models['slat_flow_model']
 
     def get_stage_name(self) -> str:
@@ -79,25 +79,25 @@ class TrellisOps(StageOps):
         return system.cfg.train.guidance
 
     # ═══════════════════════════════════════════════════════
-    # Async 友好查询
+    # Async Friendly inquiry
     # ═══════════════════════════════════════════════════════
 
     def get_latent(self, state):
         return state.stage2.z0
 
-    # get_shape_cond → 继承默认 None（单模型无 shape cond）
+    # get_shape_cond → Inherit default None(Single model has no shape cond)
 
     def decode_render_dict(self, state, system) -> Dict[str, Any]:
         """
-        根据 cfg.renderer.type 分发到 mesh 或 gs 渲染。
+        According to cfg.renderer.type distributed to mesh or gs render.
 
-        FlowEdit/Contrastive 子类复用此方法，按 retained config 选择渲染器。
+        FlowEdit/Contrastive Subclasses reuse this method, press retained config Select a renderer.
         """
         latents = state.stage2.z0
         device = system.accelerator.device
 
         renderer_type = system.cfg.renderer.type
-        renderer = system.renderers[renderer_type]  # 从 renderers dict 查找
+        renderer = system.renderers[renderer_type]  # from renderers dict Find
         if renderer_type == "gs":
             return decode_and_render_gs(
                 latents, state.cameras,
@@ -112,15 +112,15 @@ class TrellisOps(StageOps):
             return render_out
 
     # ═══════════════════════════════════════════════════════
-    # Phase 函数
+    # Phase function
     # ═══════════════════════════════════════════════════════
 
     def pre_rollout(self, state, system, global_step) -> None:
-        """Phase 0: Dense Sampling → 填充 state.coords。
+        """Phase 0: Dense Sampling → padding state.coords.
 
-        根据 cfg.train.rollout_mode 选择 student / pretrained dense rollout。
-        若 student 产生 empty coords（decode 阈值 > 0 全为 False），
-        自动 fallback 到 pretrained teacher 并设 state.dense_fallback = True。
+        According to cfg.train.rollout_mode Choose student / pretrained dense rollout.
+        If student produce empty coords(decode threshold > 0 All for False),
+        automatic fallback Arrive pretrained teacher co-located state.dense_fallback = True.
         """
         pipeline = system.pipeline
         cfg = system.cfg
@@ -162,10 +162,10 @@ class TrellisOps(StageOps):
 
     def rollout(self, state, system, seed) -> RolloutTracker:
         """
-        Phase 1: rollout_sparse → proxy chain + tracker。
+        Phase 1: rollout_sparse → proxy chain + tracker.
 
-        对齐 StageOps 签名：接收 seed（由编排函数计算），
-        内部创建 Generator 并调用 rollout_sparse。
+        Alignment StageOps Signature:Received seed(calculated by orchestration function),
+        Created in-house Generator and call rollout_sparse.
         """
         device = system.accelerator.device
         cfg = system.cfg
@@ -175,17 +175,17 @@ class TrellisOps(StageOps):
         rollout_sparse(
             state, cfg, system, device,
             generator=generator,
-            is_training=False,   # 模型推理 no_grad
-            tracker=tracker,     # ★ 记录 proxy 轨迹
+            is_training=False,   # Model reasoning no_grad
+            tracker=tracker,     # ★ record proxy trajectory
         )
         torch.cuda.empty_cache()
         return tracker
 
     def decode_render(self, state, system) -> torch.Tensor:
         """
-        Phase 2a: decode + render → comp_rgb（含 autograd 图，连接到 proxy chain）。
+        Phase 2a: decode + render → comp_rgb(Including autograd Figure, connected to proxy chain).
 
-        调用 decode_render_dict + 挂载可视化数据。
+        call decode_render_dict + Mount visual data.
         """
         render_out = self.decode_render_dict(state, system)
         comp_rgb = render_out["color"]  # (B, V, H, W, C)
@@ -194,13 +194,13 @@ class TrellisOps(StageOps):
 
     def vjp_loop(self, state, system, tracker: RolloutTracker) -> Dict[str, Any]:
         """
-        Phase 3: VJP → θ.grad 累积（委托 phases.phase3_rollout_grad_backward）。
+        Phase 3: VJP → θ.grad Accumulate(Delegate phases.phase3_rollout_grad_backward).
 
-        ★ 适配 3-sub-step Phase 2：cond_proxy.grad 仅含 guidance 梯度，
-        phase3_rollout_grad_backward 内部手动合并 reg_weight * reg_grads[i]。
+        ★ adapt 3-sub-step Phase 2:cond_proxy.grad Contains only guidance gradient,
+        phase3_rollout_grad_backward Internal manual merge reg_weight * reg_grads[i].
         """
         reg_weight = self.get_reg_weight(system)
-        log = tracker.collect_log(reg_weight=reg_weight)  # loss/reg + grad_norm/*（VJP 前收集）
+        log = tracker.collect_log(reg_weight=reg_weight)  # loss/reg + grad_norm/*(VJP collected before)
 
         phase3_rollout_grad_backward(
             state, system, system.cfg, system.accelerator.device, tracker,
@@ -210,48 +210,48 @@ class TrellisOps(StageOps):
 
 
 # =====================================================================
-# FlowEdit 训练 — Pretrained Rollout + Finetuned 单步去噪
+# FlowEdit training — Pretrained Rollout + Finetuned Single step denoising
 # =====================================================================
 
 class TrellisFlowEditOps(TrellisOps):
     """
-    FlowEdit Ops：Rollout + Finetuned 单步去噪 + 2D FlowEdit Guidance。
+    FlowEdit Ops:Rollout + Finetuned Single step denoising + 2D FlowEdit Guidance.
 
-    训练流程：
-      1. pre_rollout()           — Dense Sampling（复用 TrellisOps）
-      2. rollout()               — no_grad 完整 rollout → z₀（pretrained 或 student）
-      3. add_noise(z₀, t)       — 随机采样 t，flow matching 加噪 → zₜ（归一化域）
-      4. finetune_denoise(zₜ,t) — finetuned model 单步预测速度 → ẑ₀（有梯度）
-      5. denormalize(ẑ₀)        — 反归一化到 decoder 输入空间
-      6. decode_render_dict()    — decoder → 渲染 comp_rgb（复用 TrellisOps）
+    Training process:
+      1. pre_rollout()           — Dense Sampling(Reuse TrellisOps)
+      2. rollout()               — no_grad complete rollout → z₀(pretrained or student)
+      3. add_noise(z₀, t)       — random sampling t,flow matching Noise → zₜ(normalized domain)
+      4. finetune_denoise(zₜ,t) — finetuned model Single step prediction speed → ẑ₀(with gradient)
+      5. denormalize(ẑ₀)        — denormalize to decoder input space
+      6. decode_render_dict()    — decoder → rendering comp_rgb(Reuse TrellisOps)
 
-    不需要 VJP、proxy chain、no_sync hack，标准 autograd 即可。
+    No need VJP,proxy chain,no_sync hack, standard autograd That's it.
 
-    梯度传播路径：
-      loss → rgb_grad → decoder(frozen, 有计算图) → ẑ₀ → finetune_denoise → θ.grad
+    Gradient propagation path:
+      loss → rgb_grad → decoder(frozen, There is a calculation diagram) → ẑ₀ → finetune_denoise → θ.grad
 
-    配置要求（cfg.train 下）：
-      rollout_mode:  "pretrained" | "student"（P1 使用哪个模型 rollout）
-      noise.t_min:   时间步采样下界（默认 0.02）
-      noise.t_max:   时间步采样上界（默认 0.98）
+    Configuration requirements (cfg.train (below):
+      rollout_mode:  "pretrained" | "student"(P1 which model to use rollout)
+      noise.t_min:   Time step sampling lower bound (default 0.02)
+      noise.t_max:   Time step sampling upper bound (default 0.98)
     """
 
     # ═══════════════════════════════════════════════════════
-    # Rollout（根据 cfg.train.rollout_mode 选择模型）
+    # Rollout(according to cfg.train.rollout_mode Select model)
     # ═══════════════════════════════════════════════════════
 
     def rollout(self, state, system, seed) -> None:
         """
-        完整 rollout → clean z₀，no_grad。
+        complete rollout → clean z₀,no_grad.
 
-        根据 cfg.train.rollout_mode 选择使用哪个模型：
-          - "pretrained"：sparse_teacher_context()，使用 pretrained 权重（off-policy）
-          - "student"：直接使用当前 finetuned 权重（on-policy）
+        According to cfg.train.rollout_mode Choose which model to use:
+          - "pretrained":sparse_teacher_context(), use pretrained weight(off-policy)
+          - "student": Directly use the current finetuned weight(on-policy)
 
-        完全 no_grad，不需要任何 proxy chain。
+        completely no_grad, no need for any proxy chain.
 
         Side Effects:
-            - state.stage2.z0: 挂载 rollout 输出的 SparseTensor（反归一化后）
+            - state.stage2.z0: mount rollout Output SparseTensor(after denormalization)
         """
         device = system.accelerator.device
         cfg = system.cfg
@@ -270,24 +270,24 @@ class TrellisFlowEditOps(TrellisOps):
                 state, cfg, system, device,
                 generator=generator,
                 is_training=False,
-                tracker=None,  # 不需要 proxy chain
+                tracker=None,  # No need proxy chain
             )
-        # rollout_sparse 已经做了反归一化并挂载到 state.stage2.z0
+        # rollout_sparse Denormalization has been done and mounted to state.stage2.z0
         torch.cuda.empty_cache()
 
     # ═══════════════════════════════════════════════════════
-    # 加噪：z₀ → zₜ（归一化域操作）
+    # Add noise:z₀ → zₜ(Normalized domain operation)
     # ═══════════════════════════════════════════════════════
 
     def normalize_latent(self, state, system) -> torch.Tensor:
         """
-        将 state.stage2.z0.feats 从反归一化域 → 归一化域。
+        will state.stage2.z0.feats From the anti-normalization domain → Normalization domain.
 
-        rollout_sparse 输出的 slat 已经反归一化（denorm_feats = feats * std + mean），
-        加噪/去噪需要在归一化域进行（与训练时一致）。
+        rollout_sparse Output slat has been denormalized (denorm_feats = feats * std + mean),
+        Noise/Denoising needs to be performed in the normalized domain (consistent with training).
 
         Returns:
-            normalized_feats: (N, C) 归一化后的特征
+            normalized_feats: (N, C) Normalized features
         """
         norm = system.pipeline.pipe.slat_normalization
         device = system.accelerator.device
@@ -298,15 +298,15 @@ class TrellisFlowEditOps(TrellisOps):
 
     def add_noise(self, z0_feats: torch.Tensor, t: float, generator=None) -> torch.Tensor:
         """
-        Flow matching 加噪：zₜ = (1-t) * z₀ + t * ε
+        Flow matching Add noise:zₜ = (1-t) * z₀ + t * ε
 
         Args:
-            z0_feats: (N, C) 归一化域的 clean features
-            t: 标量时间步 ∈ (0, 1)
-            generator: 随机数生成器
+            z0_feats: (N, C) normalized domain clean features
+            t: scalar time step ∈ (0, 1)
+            generator: random number generator
 
         Returns:
-            zt_feats: (N, C) 加噪后的特征
+            zt_feats: (N, C) Features after adding noise
         """
         noise = torch.randn_like(z0_feats)
         zt = (1.0 - t) * z0_feats + t * noise
@@ -314,13 +314,13 @@ class TrellisFlowEditOps(TrellisOps):
 
     def sample_timestep(self, system) -> float:
         """
-        从 inference scheduler 的时间步序列中随机采样一个时间步。
+        from inference scheduler Randomly sample a time step from the sequence of time steps.
 
-        使用 scheduler 的实际时间步（经过 mu-shift 和 rescale_t），
-        而非简单的 Uniform(t_min, t_max)，确保对齐 inference 分布。
+        Use scheduler The actual time step of (after mu-shift and rescale_t),
+        rather than simple Uniform(t_min, t_max), ensuring alignment inference distribution.
 
         Returns:
-            t_val: 采样到的时间步值（范围 [0, 1]，与 scheduler.timesteps 一致）
+            t_val: Sampled time step value (range [0, 1], with scheduler.timesteps consistent)
         """
         pipeline = system.pipeline
         device = system.accelerator.device
@@ -328,12 +328,12 @@ class TrellisFlowEditOps(TrellisOps):
 
         scheduler = pipeline.sparse.scheduler()
         scheduler.set_timesteps(slat_steps, device=device, rescale_t=slat_rescale_t)
-        timesteps = scheduler.timesteps  # Tensor, 从大到小排列, [0, 1] 范围
+        timesteps = scheduler.timesteps  # Tensor, Arrange from largest to smallest, [0, 1] range
 
-        # 去掉最后一个（通常接近 0）
+        # remove the last one (usually close to 0)
         timesteps = timesteps[:-1]
 
-        # 可选：限制采样范围（t_min / t_max 在 config 中已经是 [0,1] 范围）
+        # Optional: Limit the sampling range (t_min / t_max in config already in [0,1] range)
         cfg = system.cfg
         t_min = float(cfg.train.noise.get("t_min", 0.02))
         t_max = float(cfg.train.noise.get("t_max", 0.98))
@@ -342,12 +342,12 @@ class TrellisFlowEditOps(TrellisOps):
         if len(valid_timesteps) == 0:
             valid_timesteps = timesteps  # fallback
 
-        # 随机选一个
+        # Choose one at random
         idx = torch.randint(0, len(valid_timesteps), (1,)).item()
         return float(valid_timesteps[idx].item())
 
     # ═══════════════════════════════════════════════════════
-    # Velocity 预测（student / teacher）
+    # Velocity predict(student / teacher)
     # ═══════════════════════════════════════════════════════
 
     def _predict_velocity_impl(
@@ -356,30 +356,30 @@ class TrellisFlowEditOps(TrellisOps):
         uncond: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
-        内部共享：构建 SparseTensor 输入 + predict_sparse_velocity_with_cfg → v_feats。
+        Internal Sharing: Build SparseTensor input + predict_sparse_velocity_with_cfg → v_feats.
 
-        调用方决定是否在 sparse_teacher_context / no_grad 下调用。
+        The caller decides whether the sparse_teacher_context / no_grad Call next.
 
         Args:
-            state: TrellisState（需要 state.stage2.z0 提供 coords）
+            state: TrellisState(Required state.stage2.z0 provide coords)
             system: TrellisSystem
-            zt_feats: (N, C) 归一化域特征
-            t_val: 时间步值（[0, 1000] 范围）
-            cond: (B, S, C) 条件编码（可选，不传则从 state 读取）
-            uncond: (B, S, C) 无条件编码（可选，不传则从 state 读取）
+            zt_feats: (N, C) Normalized domain features
+            t_val: time step value ([0, 1000] range)
+            cond: (B, S, C) Conditional encoding (optional, if not passed, follow state read)
+            uncond: (B, S, C) Unconditional encoding (optional, if not passed, it will be state read)
 
         Returns:
-            v_feats: (N, C) 预测的速度特征
+            v_feats: (N, C) Predicted speed characteristics
         """
         pipeline = system.pipeline
         device = system.accelerator.device
         _, slat_guidance, _, slat_cfg_min, slat_cfg_max, _ = pipeline.sparse.get_runtime_params()
 
-        # 构建 SparseTensor 输入
+        # build SparseTensor input
         slat = state.stage2.z0
-        x_t = slat.replace(zt_feats)  # SparseTensor with zt_feats, 共享 coords
+        x_t = slat.replace(zt_feats)  # SparseTensor with zt_feats, share coords
 
-        # 条件编码
+        # conditional encoding
         cond_emb, uncond_emb = prepare_embeddings(state, device, cond, uncond)
 
         velocity = predict_sparse_velocity_with_cfg(
@@ -390,10 +390,10 @@ class TrellisFlowEditOps(TrellisOps):
 
     def predict_velocity_student(self, state, system, zt_feats: torch.Tensor, t_val: float) -> torch.Tensor:
         """
-        Finetuned (student) model 速度预测（有 autograd 图到 θ）。
+        Finetuned (student) model Speed prediction (with autograd Picture arrived θ).
 
         Returns:
-            v_feats: (N, C) 有 autograd 图
+            v_feats: (N, C) Yes autograd Figure
         """
         return self._predict_velocity_impl(state, system, zt_feats, t_val)
 
@@ -403,11 +403,11 @@ class TrellisFlowEditOps(TrellisOps):
         uncond: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
-        Pretrained (teacher) model 速度预测（sparse_teacher_context + no_grad，detached）。
+        Pretrained (teacher) model speed prediction (sparse_teacher_context + no_grad,detached).
 
         Args:
-            cond: (B, S, C) 条件编码（可选，不传则从 state 读取）
-            uncond: (B, S, C) 无条件编码（可选，不传则从 state 读取）
+            cond: (B, S, C) Conditional encoding (optional, if not passed, follow state read)
+            uncond: (B, S, C) Unconditional encoding (optional, if not passed, it will be state read)
 
         Returns:
             v_feats: (N, C) detached
@@ -418,14 +418,14 @@ class TrellisFlowEditOps(TrellisOps):
 
     def denormalize_feats(self, feats: torch.Tensor, system) -> torch.Tensor:
         """
-        反归一化：归一化域特征 → decoder 输入域。
+        Denormalization: Normalize domain features → decoder Enter the domain.
 
         Args:
-            feats: (N, C) 归一化域特征
+            feats: (N, C) Normalized domain features
             system: TrellisSystem
 
         Returns:
-            denorm_feats: (N, C) 反归一化后的特征
+            denorm_feats: (N, C) Features after denormalization
         """
         norm = system.pipeline.pipe.slat_normalization
         device = system.accelerator.device
@@ -435,32 +435,32 @@ class TrellisFlowEditOps(TrellisOps):
 
 
 # =====================================================================
-# Contrastive FlowEdit Ops — 在 latent 空间做对比学习
+# Contrastive FlowEdit Ops — in latent Comparative learning in space
 # =====================================================================
 
 class TrellisContrastiveOps(TrellisFlowEditOps):
     """
-    Contrastive FlowEdit Ops：拓展 P4/P5 为 latent 空间对比学习。
+    Contrastive FlowEdit Ops: Expand P4/P5 for latent Spatial contrastive learning.
 
-    继承 TrellisFlowEditOps 的 P0–P3.5（dense sampling、pretrained rollout、
-    加噪、velocity 预测、velocity reg）。
+    inheritance TrellisFlowEditOps of P0–P3.5(dense sampling,pretrained rollout,
+    Add noise,velocity prediction,velocity reg).
 
-    新增方法（P4/P5）：
-      decode_render_teacher   — 渲染 Teacher z₀ → src tensor（挂载到 state）
-      edit_views              — FlowEdit 编辑 src → tgt tensor（从 state 读取 src）
-      encode_conditions       — tensor→PIL→preprocess→DINOv2 编码 → c_src, c_tgt
-      predict_x0_teacher_with_cond — Teacher 单步去噪 with custom condition
-      contrastive_loss        — 对比 loss（latent 空间）
+    New method (P4/P5):
+      decode_render_teacher   — rendering Teacher z₀ → src tensor(mounted to state)
+      edit_views              — FlowEdit Edit src → tgt tensor(from state read src)
+      encode_conditions       — tensor→PIL→preprocess→DINOv2 encoding → c_src, c_tgt
+      predict_x0_teacher_with_cond — Teacher Single step denoising with custom condition
+      contrastive_loss        — Contrast loss(latent space)
 
-    梯度传播路径：
+    Gradient propagation path:
       contrastive_loss → z0_hat_norm → v_proxy → (relay) → v_student → θ.grad
     """
 
     def decode_render_teacher(self, state, system) -> None:
         """
-        P4a: 渲染 Teacher z₀ → src 图像 tensor。
+        P4a: rendering Teacher z₀ → src image tensor.
 
-        前置条件: state.stage2.z0 == z0_teacher（P1 结束后未被修改）。
+        Preconditions: state.stage2.z0 == z0_teacher(P1 has not been modified since the end).
 
         Side Effects:
             - state.views_generated.image_tensor: (B, V, H, W, C) detached
@@ -478,11 +478,11 @@ class TrellisContrastiveOps(TrellisFlowEditOps):
 
     def edit_views(self, state, system) -> None:
         """
-        P4b: FlowEdit 编辑 src → tgt。
+        P4b: FlowEdit Edit src → tgt.
 
-        从 state.views_generated.image_tensor 读取 src，
-        使用 system.guidance.compute_guidance 做 2D FlowEdit 编辑，
-        结果统一为 (B, V, H, W, C) 挂载到 state.views_edited。
+        from state.views_generated.image_tensor read src,
+        Use system.guidance.compute_guidance do 2D FlowEdit edit,
+        The result is unified as (B, V, H, W, C) mount to state.views_edited.
 
         Side Effects:
             - state.views_edited.image_tensor: (B, V, C, H, W) detached
@@ -509,11 +509,11 @@ class TrellisContrastiveOps(TrellisFlowEditOps):
 
     def encode_conditions(self, state, system) -> None:
         """
-        P4c: tensor → PIL → preprocess → DINOv2 编码 → c_src, c_tgt。
+        P4c: tensor → PIL → preprocess → DINOv2 encoding → c_src, c_tgt.
 
-        从 state 读取 image_tensor（均为 (B, V, H, W, C)），取 view 0 转 PIL，
-        经 preprocess_image（rembg 去背 + bbox crop 居中 + resize 518）后
-        由 encode_image（DINOv2）编码为 patch token。
+        from state read image_tensor(both (B, V, H, W, C)), take view 0 turn PIL,
+        by preprocess_image(rembg Go and carry + bbox crop center + resize 518) after
+        by encode_image(DINOv2) encoded as patch token.
 
         Side Effects:
             - state.views_generated.image_condition: (B, S, C)
@@ -545,12 +545,12 @@ class TrellisContrastiveOps(TrellisFlowEditOps):
     @staticmethod
     def compute_dino_similarity(state) -> Tuple[Dict[str, float], torch.Tensor, torch.Tensor]:
         """
-        计算 src / tgt 与 input 的 DINO cosine similarity。
+        Calculate src / tgt with input of DINO cosine similarity.
 
-        读取:
-            state.views_conditioned.cond_embed       — (B, S, C) input 图像 DINO embedding
-            state.views_generated.image_condition     — (B, S, C) src (Teacher 渲染)
-            state.views_edited.image_condition        — (B, S, C) tgt (FlowEdit 编辑)
+        read:
+            state.views_conditioned.cond_embed       — (B, S, C) input image DINO embedding
+            state.views_generated.image_condition     — (B, S, C) src (Teacher rendering)
+            state.views_edited.image_condition        — (B, S, C) tgt (FlowEdit Edit)
 
         Returns:
             log_dict: sim/src_input, sim/tgt_input, sim/tgt_gt_src
@@ -579,14 +579,14 @@ class TrellisContrastiveOps(TrellisFlowEditOps):
     @staticmethod
     def adaptive_swap_conditions(state, sim_src: torch.Tensor, sim_tgt: torch.Tensor) -> float:
         """
-        Per-sample 对调 c_src / c_tgt：当 sim_src > sim_tgt 时交换。
+        Per-sample Swap c_src / c_tgt: When sim_src > sim_tgt time exchange.
 
-        修改:
+        Modify:
             state.views_generated.image_condition
             state.views_edited.image_condition
 
         Returns:
-            swap_rate: 被交换的 sample 比例
+            swap_rate: exchanged sample Proportion
         """
         swap_mask = sim_src > sim_tgt  # (B,)
         swap_rate = swap_mask.float().mean().item()
@@ -611,15 +611,15 @@ class TrellisContrastiveOps(TrellisFlowEditOps):
         cond_source: str = "edited",
     ) -> torch.Tensor:
         """
-        P5a/b: Teacher 单步去噪 with condition from state → ẑ₀。
+        P5a/b: Teacher Single step denoising with condition from state → ẑ₀.
 
-        临时替换 state 中的条件编码，调用 predict_velocity_teacher，
-        然后恢复原始条件。
+        temporary replacement state Conditional coding in, call predict_velocity_teacher,
+        Then restore the original condition.
 
         Args:
-            zt_feats: (N, C) 加噪特征（detached）
-            t_val: 时间步
-            cond_source: 从 state 哪个子容器读取 image_condition。
+            zt_feats: (N, C) Noise feature (detached)
+            t_val: time step
+            cond_source: from state which subcontainer reads image_condition.
                          "edited"    → state.views_edited.image_condition
                          "generated" → state.views_generated.image_condition
 
@@ -633,8 +633,8 @@ class TrellisContrastiveOps(TrellisFlowEditOps):
         else:
             raise ValueError(f"Unknown cond_source: {cond_source!r}, expected 'edited' or 'generated'")
 
-        # teacher_cfg=True  → uncond=zeros，走 CFG
-        # teacher_cfg=False → uncond=None，跳过 CFG
+        # teacher_cfg=True  → uncond=zeros, go CFG
+        # teacher_cfg=False → uncond=None, skip CFG
         teacher_cfg = system.cfg.train.loss.contrastive.teacher_cfg
         uncond_emb = torch.zeros_like(cond_emb) if teacher_cfg else None
         v_teacher = self.predict_velocity_teacher(
@@ -654,15 +654,15 @@ class TrellisContrastiveOps(TrellisFlowEditOps):
         eps: float = 1e-4,
     ) -> torch.Tensor:
         """
-        P5c: 对比 loss — latent 空间。
+        P5c: Contrast loss — latent space.
 
-        让 student 预测靠近 teacher_tgt（正样本），远离 teacher_src（负样本）。
+        let student Forecast is close teacher_tgt(positive sample), stay away teacher_src(negative sample).
 
         Args:
-            z0_stu:     (N, C) 有梯度（通过 v_proxy）
+            z0_stu:     (N, C) There is a gradient (via v_proxy)
             z0_tea_tgt: (N, C) detached, positive
             z0_tea_src: (N, C) detached, negative
-            ada: 自适应归一化
+            ada: adaptive normalization
             eps: ada epsilon
 
         Returns:
@@ -683,19 +683,19 @@ class TrellisContrastiveOps(TrellisFlowEditOps):
 
 class TrellisDenseOps(TrellisFlowEditOps):
     """
-    Dense (Stage 1) Ops — sparse_structure_flow_model。
+    Dense (Stage 1) Ops — sparse_structure_flow_model.
 
-    操作 dense Tensor (B, C, R, R, R) 而非 SparseTensor。
-    无 normalization（Stage 1 不存在 ss_normalization）。
-    不提供 decode_render — 复用 Sparse stage 的渲染结果。
+    Operation dense Tensor (B, C, R, R, R) rather than SparseTensor.
+    None normalization(Stage 1 does not exist ss_normalization).
+    Not available decode_render — Reuse Sparse stage rendering result.
     """
 
     # ═══════════════════════════════════════════════════════
-    # 配置查询
+    # Configure query
     # ═══════════════════════════════════════════════════════
 
     def get_model(self, system):
-        """返回 DDP 包装的 sparse_structure_flow_model。"""
+        """Return DDP packaged sparse_structure_flow_model."""
         return system.pipeline.pipe.models['sparse_structure_flow_model']
 
     def get_stage_name(self) -> str:
@@ -710,7 +710,7 @@ class TrellisDenseOps(TrellisFlowEditOps):
 
     def rollout(self, state, system, seed) -> None:
         """
-        Dense rollout → clean z_s，no_grad。
+        Dense rollout → clean z_s,no_grad.
 
         Side Effects:
             - state.stage1.z0: (B, C, R, R, R) dense latent
@@ -735,30 +735,30 @@ class TrellisDenseOps(TrellisFlowEditOps):
         torch.cuda.empty_cache()
 
     # ═══════════════════════════════════════════════════════
-    # Normalize / Denormalize — Stage 1 无 normalization
+    # Normalize / Denormalize — Stage 1 None normalization
     # ═══════════════════════════════════════════════════════
 
     def normalize_latent(self, state, system) -> torch.Tensor:
-        """Stage 1 无 normalization，直接返回 z0。"""
+        """Stage 1 None normalization, return directly z0."""
         return state.stage1.z0  # (B, C, R, R, R)
 
     def denormalize_feats(self, feats: torch.Tensor, system) -> torch.Tensor:
-        """Stage 1 无 normalization，身份映射。"""
+        """Stage 1 None normalization, identity mapping."""
         return feats
 
     # ═══════════════════════════════════════════════════════
-    # 加噪 / 采样时间步
+    # Noise / Sampling time step
     # ═══════════════════════════════════════════════════════
 
     def sample_timestep(self, system) -> float:
         """
-        从 Stage 1 的 scheduler 时间步序列中随机采样。
+        from Stage 1 of scheduler Randomly sampled from a sequence of time steps.
         """
         pipeline = system.pipeline
         ss_steps, _, ss_rescale_t, _, _ = pipeline.dense.get_runtime_params()
 
         t_seq, _ = pipeline.dense.scheduler(ss_steps, ss_rescale_t)
-        # 去掉最后一个（接近 0）
+        # Remove the last one (closer to 0)
         t_seq = t_seq[:-1]
 
         cfg = system.cfg
@@ -772,7 +772,7 @@ class TrellisDenseOps(TrellisFlowEditOps):
         return float(valid[idx])
 
     # ═══════════════════════════════════════════════════════
-    # Velocity 预测 — dense Tensor
+    # Velocity Forecast — dense Tensor
     # ═══════════════════════════════════════════════════════
 
     def _predict_velocity_impl(
@@ -781,11 +781,11 @@ class TrellisDenseOps(TrellisFlowEditOps):
         uncond: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
-        Dense velocity 预测 with CFG。
+        Dense velocity Forecast with CFG.
 
         Args:
             zt: (B, C, R, R, R)
-            t_val: 时间步 ∈ [0, 1]
+            t_val: time step ∈ [0, 1]
 
         Returns:
             velocity: (B, C, R, R, R)
@@ -814,28 +814,28 @@ class TrellisDenseOps(TrellisFlowEditOps):
         return v.detach()
 
     # ═══════════════════════════════════════════════════════
-    # 不提供 decode / render
+    # Not available decode / render
     # ═══════════════════════════════════════════════════════
 
     def decode_render_dict(self, state, system):
-        raise NotImplementedError("TrellisDenseOps 不提供 decode_render，应复用 Sparse stage 渲染结果。")
+        raise NotImplementedError("TrellisDenseOps Not available decode_render, should be reused Sparse stage Rendering results.")
 
 
 # =====================================================================
-# Dense Contrastive Ops — 在 Dense latent 空间做对比学习
+# Dense Contrastive Ops — in Dense latent Comparative learning in space
 # =====================================================================
 
 class TrellisDenseContrastiveOps(TrellisDenseOps):
     """
-    Dense Contrastive Ops：在 Dense (B,C,R,R,R) latent 空间做对比学习。
+    Dense Contrastive Ops: in Dense (B,C,R,R,R) latent Space for comparative learning.
 
-    复用 Sparse stage 的 c_src / c_tgt（DINOv2 条件编码），
-    不自行渲染/编辑/编码。
+    Reuse Sparse stage of c_src / c_tgt(DINOv2 conditional encoding),
+    Does not render itself/Edit/Encoding.
 
-    方法来源：
+    Method source:
       rollout / normalize / add_noise / sample_timestep / velocity → TrellisDenseOps
-      predict_x0_teacher_with_cond → 本类（dense 版本）
-      contrastive_loss → TrellisContrastiveOps（复用）
+      predict_x0_teacher_with_cond → This category (dense version)
+      contrastive_loss → TrellisContrastiveOps(reuse)
     """
 
     def predict_x0_teacher_with_cond(
@@ -847,11 +847,11 @@ class TrellisDenseContrastiveOps(TrellisDenseOps):
         cond_source: str = "edited",
     ) -> torch.Tensor:
         """
-        Teacher 单步去噪 with condition → ẑ₀ (dense)。
+        Teacher Single step denoising with condition → ẑ₀ (dense).
 
         Args:
-            zt: (B, C, R, R, R) 加噪 latent
-            t_val: 时间步
+            zt: (B, C, R, R, R) Noise latent
+            t_val: time step
             cond_source: "edited" | "generated"
 
         Returns:
@@ -864,8 +864,8 @@ class TrellisDenseContrastiveOps(TrellisDenseOps):
         else:
             raise ValueError(f"Unknown cond_source: {cond_source!r}")
 
-        # teacher_cfg=True  → uncond=zeros，走 CFG
-        # teacher_cfg=False → uncond=None，跳过 CFG
+        # teacher_cfg=True  → uncond=zeros, go CFG
+        # teacher_cfg=False → uncond=None, skip CFG
         teacher_cfg = system.cfg.train.loss.contrastive.teacher_cfg
         uncond_emb = torch.zeros_like(cond_emb) if teacher_cfg else None
         v_teacher = self.predict_velocity_teacher(
@@ -884,9 +884,9 @@ class TrellisDenseContrastiveOps(TrellisDenseOps):
         eps: float = 1e-4,
     ) -> torch.Tensor:
         """
-        Dense 对比 loss — 在 (B, C, R, R, R) 空间操作。
+        Dense Contrast loss — in (B, C, R, R, R) space operations.
 
-        将 5D tensor 展平为 (B, C*R*R*R) 后调用 contrastive_loss_step。
+        will 5D tensor flattened to (B, C*R*R*R) call after contrastive_loss_step.
         """
         B = z0_stu.shape[0]
         return contrastive_loss_step(

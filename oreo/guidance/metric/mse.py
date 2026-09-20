@@ -1,4 +1,4 @@
-"""像素空间 MSE loss。"""
+"""pixel space MSE loss."""
 import logging
 from typing import Optional
 
@@ -10,10 +10,10 @@ from .base import BaseMetric
 
 class MSEMetric(BaseMetric):
     """
-    像素空间 MSE Metric。
+    pixel space MSE Metric.
 
-    直接计算渲染图与编辑图在像素空间的均方误差。
-    梯度路径：loss → MSE → comp_rgb → 3D model
+    Directly calculate the mean square error between the rendered image and the edited image in pixel space.
+    Gradient path:loss → MSE → comp_rgb → 3D model
     """
 
     name = "mse"
@@ -24,9 +24,9 @@ class MSEMetric(BaseMetric):
 
     def compute(
         self,
-        rendered: torch.Tensor,  # (B,C,H,W) [0,1]，有梯度
-        target: torch.Tensor,    # (B,C,H,W) [0,1]，无梯度
+        rendered: torch.Tensor,  # (B,C,H,W) [0,1], with gradient
+        target: torch.Tensor,    # (B,C,H,W) [0,1], no gradient
         **kwargs,
     ) -> Optional[torch.Tensor]:
-        """计算像素空间 MSE loss。"""
+        """Compute pixel space MSE loss."""
         return F.mse_loss(rendered, target.detach())  # scalar

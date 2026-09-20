@@ -1,22 +1,22 @@
 """
-StageOps 抽象基类 — 训练阶段的计算操作协议。
+StageOps abstract base class — Computational operation protocol for the training phase.
 
-定义每个训练阶段 "做什么" 的接口，不包含任何清理/编排/生命周期知识。
-同一个 Ops 实例可在同步/异步/单阶段/多阶段模板中复用。
+Define each training phase "what to do" interface, does not contain any cleanup/Arrange/Life cycle knowledge.
+same one Ops Instances can be synchronized at/asynchronous/single stage/Reuse in multi-stage templates.
 
-此文件仅包含模型无关的 ABC 和异常类；
-具体实现（ShapeOps / TexOps 等）由各模型后端自行提供。
+This file only contains model-independent ABC and exception classes;
+specific implementation (ShapeOps / TexOps etc.) are provided by each model backend.
 
-使用方式::
+Usage::
 
     from oreo.systems.utils.stage_ops import StageOps
 
     class MyOps(StageOps):
         ...
 
-设计原则：
-  - 清理策略由 Slot（编排层）决定，不由 Ops 决定
-  - Ops 只回答 "这个阶段自身的计算是什么？"
+Design principles:
+  - Cleanup strategy consists of Slot(orchestration layer) determines, not by Ops decide
+  - Ops Just answer "What is the calculation of this stage itself?"
 """
 
 from __future__ import annotations
@@ -31,137 +31,137 @@ if TYPE_CHECKING:
 
 
 # =====================================================================
-# 异常
+# Abnormal
 # =====================================================================
 
 class StageSkipError(Exception):
-    """阶段降级异常 — 前置条件不满足（如 meshes 为 None），跳过后续计算。"""
+    """Stage downgrade exception — The preconditions are not met (such as meshes for None), skip subsequent calculations."""
     pass
 
 
 # =====================================================================
-# 抽象基类
+# abstract base class
 # =====================================================================
 
 class StageOps(ABC):
     """
-    单个训练阶段的计算操作接口。
+    Computational operation interface for a single training stage.
 
-    封装阶段特有的计算逻辑（rollout / decode+render / VJP），
-    不包含任何清理策略、生命周期管理或编排知识。
+    Computational logic unique to the packaging stage (rollout / decode+render / VJP),
+    Does not include any knowledge of cleanup strategies, lifecycle management, or orchestration.
 
-    子类只需关注 "我这个阶段怎么计算"，不需要知道：
-    - 我是不是最后一个阶段
-    - 我的 subs/meshes 是否被后续阶段需要
-    - 我是同步执行还是异步流水线
+    Subclasses only need to pay attention to "How do I calculate this at this stage?", no need to know:
+    - Am I in the last stage?
+    - mine subs/meshes Whether it is needed in subsequent stages
+    - Should I execute it synchronously or pipeline it asynchronously?
     """
 
     # ═══════════════════════════════════════════════════════
-    # 配置查询
+    # Configure query
     # ═══════════════════════════════════════════════════════
 
     @abstractmethod
     def get_model(self, system):
-        """返回该阶段的 model（DDP 包装后）。"""
+        """Return to this stage model(DDP after packaging)."""
         ...
 
     @abstractmethod
     def get_stage_name(self) -> str:
-        """返回阶段名称（"shape" / "tex"），用于 pipeline.get_stage_config() 等。"""
+        """Return stage name ("shape" / "tex"), used for pipeline.get_stage_config() Wait."""
         ...
 
     @abstractmethod
     def get_reg_weight(self, system) -> float:
-        """返回 reg loss 权重（cfg.{stage}.train.loss.reg）。"""
+        """Return reg loss weight(cfg.{stage}.train.loss.reg)."""
         ...
 
     @abstractmethod
     def get_guidance_weight(self, system) -> float:
-        """返回 guidance loss 权重（cfg.{stage}.train.loss.guidance）。"""
+        """Return guidance loss weight(cfg.{stage}.train.loss.guidance)."""
         ...
 
     @abstractmethod
     def get_guidance_cfg(self, system):
-        """返回 guidance 配置（cfg.{stage}.guidance）。"""
+        """Return guidance configure(cfg.{stage}.guidance)."""
         ...
 
     # ═══════════════════════════════════════════════════════
-    # Async 友好查询（VJP loop / P2-grad 复用）
+    # Async Friendly inquiry (VJP loop / P2-grad multiplexing)
     # ═══════════════════════════════════════════════════════
 
     @abstractmethod
     def get_latent(self, state):
-        """返回该阶段的 latent（dense / sparse），VJP 通过 .replace() 构建 x_t。"""
+        """Return to this stage latent(dense / sparse),VJP Pass .replace() build x_t."""
         ...
 
     def get_shape_cond(self, state):
-        """返回 VJP 所需的 shape_cond。Shape→None, Tex→shape_slat_norm。默认 None。"""
+        """Return VJP required shape_cond.Shape→None, Tex→shape_slat_norm. Default None."""
         return None
 
     @abstractmethod
     def decode_render_dict(self, state, system) -> Dict[str, Any]:
         """
-        decode+render → 原始字典（含 'color' key）。
+        decode+render → Original dictionary (including 'color' key).
 
-        与 decode_render 的区别：不做 vis 挂载，不做 subs/meshes 赋值。
-        用于异步 P2-grad 重跑（只需 comp_rgb.backward）和 P2-no-grad。
+        with decode_render The difference: don't do vis Mount, don't do it subs/meshes Assignment.
+        for asynchronous P2-grad Rerun (just comp_rgb.backward) and P2-no-grad.
 
-        子类 decode_render 应调用此方法 + 附加 vis 挂载逻辑。
+        Subclass decode_render This method should be called + additional vis Mount logic.
         """
         ...
 
     # ═══════════════════════════════════════════════════════
-    # Phase 函数
+    # Phase function
     # ═══════════════════════════════════════════════════════
 
     def pre_rollout(self, state, system, global_step) -> None:
         """
-        Phase 0: Rollout 前的准备（可选）。
+        Phase 0: Rollout Preparation (optional).
 
-        - Shape: dense_sampling → 填充 state.coords
-        - Tex (standalone): shape_frozen_prepare → 填充 shape 产物 + detach
-        - Tex (from shape): no-op（shape 产物由上游提供）
+        - Shape: dense_sampling → padding state.coords
+        - Tex (standalone): shape_frozen_prepare → padding shape product + detach
+        - Tex (from shape): no-op(shape Products are provided by upstream)
 
-        默认 no-op，子类按需覆写。
+        Default no-op, subclasses override as needed.
         """
         pass
 
     @abstractmethod
     def rollout(self, state, system, seed) -> RolloutTracker:
         """
-        Phase 1: rollout → proxy chain + tracker。
+        Phase 1: rollout → proxy chain + tracker.
 
-        填充 state.features.{shape,tex}_slat (proxy chain)。
-        返回 RolloutTracker（含 input/output trajectory, timesteps, reg_grads）。
+        padding state.features.{shape,tex}_slat (proxy chain).
+        Return RolloutTracker(Including input/output trajectory, timesteps, reg_grads).
         """
         ...
 
     @abstractmethod
     def decode_render(self, state, system) -> torch.Tensor:
         """
-        Phase 2a: decode + render → comp_rgb。
+        Phase 2a: decode + render → comp_rgb.
 
-        返回 comp_rgb (B, V, H, W, 3)。
-        调用时是否有 autograd 图取决于调用方上下文（同步模板带梯度，异步模板 no_grad）。
+        Return comp_rgb (B, V, H, W, 3).
+        Is there any when calling autograd The graph depends on the caller context (synchronous templates with gradients, async templates no_grad).
 
         Side effects:
-        - 挂载 vis 数据到 state（e.g., views_generated.shape_tensor）
-        - 挂载中间产物到 state（e.g., features.subs, features.meshes）
+        - mount vis data arrives state(e.g., views_generated.shape_tensor)
+        - Mount the intermediate product to state(e.g., features.subs, features.meshes)
 
         Raises:
-            StageSkipError: 前置条件不满足（如 meshes 为 None）
+            StageSkipError: The preconditions are not met (such as meshes for None)
         """
         ...
 
     @abstractmethod
     def vjp_loop(self, state, system, tracker: RolloutTracker) -> Dict[str, Any]:
         """
-        Phase 3: VJP → θ.grad 累积。
+        Phase 3: VJP → θ.grad Accumulate.
 
-        逐步/批量重算 f_θ，用 tracker 中的梯度做 VJP → 模型参数梯度累积。
-        内部自行清理 tracker 数据。
+        gradually/Batch recalculation f_θ, use tracker gradient in VJP → Model parameter gradient accumulation.
+        Internal self-cleaning tracker data.
 
         Returns:
-            日志字典（通常含 loss/reg 或空 dict）
+            log dictionary (usually containing loss/reg or empty dict)
         """
         ...

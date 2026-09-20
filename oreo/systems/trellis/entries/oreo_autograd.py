@@ -1,24 +1,24 @@
 """
-Trellis Dual Contrastive 训练入口 — Sparse + Dense 双阶段 latent 空间对比学习。
+Trellis Dual Contrastive Training entrance — Sparse + Dense dual stage latent Spatial contrastive learning.
 
-训练流程（两阶段串行，降低峰值显存）：
+Training process (two-stage serial, reducing peak video memory):
   ── Sparse Stage → optimizer_sparse.step ──
-  Phase 0–5d: 执行 shared sparse contrastive phase，产出 c_src / c_tgt
-  → clip_grad_norm + optimizer_sparse.step + zero_grad（释放 sparse 梯度）
+  Phase 0–5d: execute shared sparse contrastive phase, output c_src / c_tgt
+  → clip_grad_norm + optimizer_sparse.step + zero_grad(release sparse gradient)
 
   ── Dense Stage → optimizer_dense.step ──
-  D1–D3c: 复用 Sparse 产出的 state.stage1.z0 + c_src / c_tgt
-  → clip_grad_norm + optimizer_dense.step + zero_grad（释放 dense 梯度）
+  D1–D3c: Reuse Sparse Output state.stage1.z0 + c_src / c_tgt
+  → clip_grad_norm + optimizer_dense.step + zero_grad(release dense gradient)
 
-峰值显存 = max(sparse_grad, dense_grad)，而非二者之和。
+Peak memory = max(sparse_grad, dense_grad), rather than the sum of the two.
 
-梯度传播：
+Gradient propagation:
   Sparse: contrastive_loss → v_proxy → v_student → slat_flow_model.grad
   Dense:  contrastive_loss → v_proxy → v_student → sparse_structure_flow_model.grad
 """
 
 # =====================================================================
-# 标准库 + 第三方库
+# standard library + Third-party libraries
 # =====================================================================
 import gc
 import logging
@@ -33,7 +33,7 @@ from absl import app
 from accelerate import Accelerator
 
 # =====================================================================
-# TRELLIS 参考实现路径
+# TRELLIS Reference implementation path
 # =====================================================================
 repo_root = os.path.abspath(os.getcwd())
 trellis_ref_root = os.path.join(repo_root, "_reference_codes", "TRELLIS")
@@ -44,7 +44,7 @@ if triposf_ref_root not in sys.path:
     sys.path.insert(0, triposf_ref_root)
 
 # =====================================================================
-# 项目内部导入
+# Import within project
 # =====================================================================
 from oreo.systems.base import (
     TrainModeGuard,
@@ -71,23 +71,23 @@ from oreo.systems.trellis.autograd_template import (
 from oreo.systems.trellis.stage_ops import TrellisContrastiveOps, TrellisDenseContrastiveOps
 
 # =====================================================================
-# 主函数入口
+# Main function entry
 # =====================================================================
 
 def main(argv) -> None:
     """
-    Dual Contrastive 训练主入口。
+    Dual Contrastive Main entrance to training.
     """
     del argv
     cfg = _CONFIG.value
 
     # =====================================================
-    # Step 1: 环境设置
+    # Step 1: Environment settings
     # =====================================================
     TrellisSystem.setup_env_and_seed(cfg)
 
     # =====================================================
-    # Step 2: 初始化 Accelerator
+    # Step 2: initialization Accelerator
     # =====================================================
     accelerator = Accelerator(
         mixed_precision=cfg.mixed_precision,
@@ -96,7 +96,7 @@ def main(argv) -> None:
     )
 
     # =====================================================
-    # Step 3: 创建运行目录
+    # Step 3: Create run directory
     # =====================================================
     run_root, logs_dir, visuals_train_dir, visuals_eval_dir = build_run_paths(cfg, accelerator)
 
@@ -116,19 +116,19 @@ def main(argv) -> None:
     )
 
     # =====================================================
-    # Step 4: 构建数据加载器
+    # Step 4: Build data loader
     # =====================================================
     train_loader, eval_loader = build_dataloaders(cfg, accelerator)
 
     # =====================================================
-    # Step 5: 构建系统组件
+    # Step 5: Build system components
     # =====================================================
     system = build_flowedit_system(cfg, accelerator, guidance_factory=create_guidance)
     system = system.prepare_lora(cfg, adapter="base", load_path=None, clone_from=None)
     system = system.prepare_models_and_optimizers(cfg, accelerator)
 
     # =====================================================
-    # Step 6: 检查点管理
+    # Step 6: Checkpoint management
     # =====================================================
     ckpt_root = run_root / "checkpoints"
     ckpt_io = CheckpointIO(accelerator, ckpt_root)
@@ -136,7 +136,7 @@ def main(argv) -> None:
     global_step = int(ckpt_io.start_global_step)
 
     # =====================================================
-    # Step 7: 评估模式
+    # Step 7: Assessment mode
     # =====================================================
     if cfg.eval_only:
         eval_log = evaluate(
@@ -152,7 +152,7 @@ def main(argv) -> None:
         return
 
     # =====================================================
-    # Step 8: 训练循环（★ Dual Contrastive）
+    # Step 8: training loop (★ Dual Contrastive)
     # =====================================================
     train_logger = MetricLogger(accelerator, logs_dir / "train.csv")
 
@@ -200,7 +200,7 @@ def main(argv) -> None:
 
             train_log = {**sparse_log, **dense_log}
 
-            # 可视化保存
+            # Visual save
             if accelerator.is_main_process and (global_step % visual_io.vis_freq == 0):
                 _pipe = system.guidance.pipe if system.guidance else None
                 _n_prog = cfg.freq.save.progress_samples
@@ -209,13 +209,13 @@ def main(argv) -> None:
                     pipe=_pipe, n_progress_samples=_n_prog,
                 )
 
-            # profiler 收集 + 日志合并
+            # profiler collect + Log merge
             time_log = profiler.collect(global_step, print_freq=10)
             train_log.update(time_log)
 
             train_logger.log_step(train_log, len(batch['image_pils']), global_step, epoch)
 
-        # ---- 周期性评估 ----
+        # ---- periodic evaluation ----
         if cfg.freq.eval and (epoch % int(cfg.freq.eval) == 0):
             eval_log = evaluate(
                 system, cfg, accelerator,
@@ -228,13 +228,13 @@ def main(argv) -> None:
             eval_logger.accumulate(eval_log, 1)
             eval_logger.flush(global_step, epoch)
 
-        # ---- 周期性保存检查点 ----
+        # ---- Periodically save checkpoints ----
         if cfg.freq.save.ckpt and (epoch % int(cfg.freq.save.ckpt) == 0):
             ckpt_io.save(system, state, cfg, epoch, global_step)
 
 
 # =====================================================================
-# 程序入口点
+# program entry point
 # =====================================================================
 if __name__ == "__main__":
     app.run(main)

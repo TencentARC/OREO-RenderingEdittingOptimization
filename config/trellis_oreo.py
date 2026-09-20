@@ -1,63 +1,63 @@
-"""TRELLIS Dual-Stage Contrastive FlowEdit 训练配置 — Sparse + Dense 双阶段对比学习。
+"""TRELLIS Dual-Stage Contrastive FlowEdit training configuration — Sparse + Dense Two-stage contrastive learning.
 
-对应入口: oreo.systems.trellis.entries.oreo_autograd
+Corresponding entrance: oreo.systems.trellis.entries.oreo_autograd
 
-训练流程：
+Training process:
   ── Sparse Stage ──
   Pretrained Rollout (frozen) → clean z₀ (sparse)
-  → 加噪 → Student velocity → ẑ₀ → Render → FlowEdit → c_src / c_tgt
+  → Noise → Student velocity → ẑ₀ → Render → FlowEdit → c_src / c_tgt
   → Contrastive loss → slat_flow_model.grad
 
-  ── Dense Stage（复用 c_src / c_tgt）──
+  ── Dense Stage(Reuse c_src / c_tgt)──
   Dense Rollout (frozen) → clean z_s (dense)
-  → 加噪 → Student velocity → ẑ_s₀
+  → Noise → Student velocity → ẑ_s₀
   → Teacher denoise with c_tgt / c_src → positive / negative
   → Contrastive loss → sparse_structure_flow_model.grad
 
-配置结构:
-    cfg.guidance              → Guidance 初始化（FlowEdit 模型加载）
-    cfg.train.guidance        → FlowEdit 运行时参数（prompt / cfg scale / loss 权重）
-    cfg.train.noise           → 加噪时间步采样配置（Sparse + Dense 共享）
-    cfg.train.loss.contrastive → 对比 loss 参数（ada, eps, dense_weight）
-    cfg.renderer              → 渲染器配置（仅 gs）
-    cfg.train                 → 训练超参（mode, optimizer, loss, gradient_accumulation_steps）
+Configuration structure:
+    cfg.guidance              → Guidance initialize(FlowEdit Model loading)
+    cfg.train.guidance        → FlowEdit runtime parameters (prompt / cfg scale / loss weight)
+    cfg.train.noise           → Noise time step sampling configuration (Sparse + Dense share)
+    cfg.train.loss.contrastive → Contrast loss Parameters (ada, eps, dense_weight)
+    cfg.renderer              → Renderer configuration (only gs)
+    cfg.train                 → Training hyperparameters (mode, optimizer, loss, gradient_accumulation_steps)
 """
 import ml_collections
 
 
 # =====================================================================
-# 辅助配置函数
+# Auxiliary configuration function
 # =====================================================================
 
 def _flowedit_init_config(g: ml_collections.ConfigDict):
-    """FlowEdit 采样参数（构造 Pipeline 时读取一次）。"""
+    """FlowEdit Sampling parameters (construct Pipeline read once)."""
     g.flowedit = ml_collections.ConfigDict()
-    g.flowedit.steps = 12       # 总时间步数
-    g.flowedit.n_max = 9        # 实际执行的最后 n_max 步
-    g.flowedit.noise_mode = "aligned"  # 加噪模式（aligned / random）
+    g.flowedit.steps = 12       # Total time steps
+    g.flowedit.n_max = 9        # actual execution at the end n_max step
+    g.flowedit.noise_mode = "aligned"  # Noise mode (aligned / random)
     g.flowedit.csd_pos_mode = "cfg"
     g.flowedit.csd_neg_mode = "uncond"
     g.flowedit.remove_tgt_neg = True
 
 
 def _flowedit_runtime_config():
-    """FlowEdit 运行时参数（per-call，传入 compute_guidance）。"""
+    """FlowEdit runtime parameters (per-call, pass in compute_guidance)."""
     cfg = ml_collections.ConfigDict()
 
     cfg.seed = 0
     cfg.bg_color = [1.0, 1.0, 1.0]
 
-    # Target 分支
+    # Target branch
     cfg.true_cfg_scale_tgt = 4
     cfg.target_prompt = "Rotate the camera. White background."
     cfg.negative_prompt_tgt = " "
 
-    # Source 分支
-    cfg.true_cfg_scale_src = -1 * cfg.true_cfg_scale_tgt  # 反向引导
+    # Source branch
+    cfg.true_cfg_scale_src = -1 * cfg.true_cfg_scale_tgt  # reverse boot
     cfg.source_prompt = cfg.target_prompt
     cfg.negative_prompt_src = cfg.negative_prompt_tgt
 
-    # 多步 Loss 聚合（仅 compute_guidance 路径使用，edit() 路径不需要）
+    # multiple steps Loss Aggregation (only compute_guidance path usage,edit() Path is not required)
     cfg.reduce_mode = "final"
     cfg.ada_normalize = False
     cfg.ada_eps = 1e-4
@@ -66,7 +66,7 @@ def _flowedit_runtime_config():
 
 
 def _adaptive_distance_config(cfg: ml_collections.ConfigDict):
-    """为 train/eval 数据添加 adaptive_distance 配置。"""
+    """for train/eval Data addition adaptive_distance configuration."""
     cfg.data.train.adaptive_distance = ml_collections.ConfigDict()
     cfg.data.train.adaptive_distance.enabled = True
     cfg.data.train.adaptive_distance.fill_ratio = 0.9
@@ -77,11 +77,11 @@ def _adaptive_distance_config(cfg: ml_collections.ConfigDict):
 
 
 # =====================================================================
-# 主配置
+# main configuration
 # =====================================================================
 
 def get_config():
-    """TRELLIS Dual-Stage Contrastive FlowEdit 训练配置（Sparse + Dense 双阶段对比学习）。"""
+    """TRELLIS Dual-Stage Contrastive FlowEdit training configuration (Sparse + Dense Dual-stage contrastive learning)."""
     cfg = ml_collections.ConfigDict()
 
     # === General ===
@@ -95,7 +95,7 @@ def get_config():
     # Keep the training precision explicit so it is persisted with each run.
     cfg.mixed_precision = "no"
 
-    # === 频率控制 ===
+    # === frequency control ===
     cfg.freq = ml_collections.ConfigDict()
     cfg.freq.save = ml_collections.ConfigDict()
     cfg.freq.save.visual = 1
@@ -103,7 +103,7 @@ def get_config():
     cfg.freq.save.progress_samples = 4
     cfg.freq.eval = 1
 
-    # === 数据配置 ===
+    # === Data configuration ===
     cfg.data = ml_collections.ConfigDict()
 
     cfg.data.train = ml_collections.ConfigDict()
@@ -125,11 +125,11 @@ def get_config():
     cfg.data.eval.fov_range = [40.0, 40.0]
     _adaptive_distance_config(cfg)
 
-    # === 预训练权重 ===
+    # === Pre-trained weights ===
     cfg.pretrained = ml_collections.ConfigDict()
     cfg.pretrained.model = "./pretrained_weights/TRELLIS-image-large"
 
-    # === Renderer 配置（★ 仅 GS Color 渲染） ===
+    # === Renderer configure(★ only GS Color rendering) ===
     cfg.renderer = ml_collections.ConfigDict()
     cfg.renderer.resolution = 1024
     cfg.renderer.type = "gs"
@@ -140,16 +140,16 @@ def get_config():
     cfg.renderer.gs.far = 1.6
     cfg.renderer.gs.bg_color = [1.0, 1.0, 1.0]
 
-    # === 训练超参 ===
+    # === Training hyperparameters ===
     cfg.train = tr = ml_collections.ConfigDict()
 
-    tr.mode = "full"  # Contrastive 使用全参微调
+    tr.mode = "full"  # Contrastive Use full parameter fine-tuning
 
-    # Rollout 模式: "pretrained" (off-policy) | "student" (on-policy)
+    # Rollout mode: "pretrained" (off-policy) | "student" (on-policy)
     tr.rollout_mode = "student"
 
-    # Student 单步去噪是否使用 CFG（同时控制 P3.5 reg teacher）
-    # True = 保持 pipeline 默认, False = 跳过 uncond forward pass
+    # Student Whether to use single-step denoising CFG(Control simultaneously P3.5 reg teacher)
+    # True = keep pipeline Default, False = skip uncond forward pass
     tr.student_denoise_cfg = True
 
     tr.gradient_accumulation_steps = 1
@@ -159,44 +159,44 @@ def get_config():
     tr.optimizer.weight_decay = 0.0
     tr.optimizer.eps = 1e-4
 
-    # ★ 启用 Dense Stage 优化器（Dual-Stage 训练必须）
+    # ★ enable Dense Stage optimizer(Dual-Stage training required)
     tr.dense_optimizer = True
 
-    # === Rollout 配置 ===
+    # === Rollout Configuration ===
     cfg.rollout = ml_collections.ConfigDict()
     cfg.rollout.type = "ode"
     cfg.rollout.reg = ml_collections.ConfigDict()
-    cfg.rollout.reg.type = "none"  # Contrastive 不需要 rollout 正则化
+    cfg.rollout.reg.type = "none"  # Contrastive No need rollout regularization
 
-    # === ★ 加噪时间步采样配置 ===
+    # === ★ Noisy time step sampling configuration ===
     tr.noise = ml_collections.ConfigDict()
     tr.noise.t_min = 0.02
     tr.noise.t_max = 0.98
 
-    # === Guidance 初始化配置（FlowEdit 模型加载） ===
+    # === Guidance Initialization configuration (FlowEdit Model loading) ===
     cfg.guidance = g = ml_collections.ConfigDict()
     g.type = "flowedit"
     g.model_path = "Qwen/Qwen-Image-Edit-2511"
     g.edit_resolution = 1024
     _flowedit_init_config(g)
 
-    # === Guidance 运行时配置（FlowEdit） ===
+    # === Guidance Runtime configuration (FlowEdit) ===
     tr.guidance = _flowedit_runtime_config()
     tr.guidance.bg_color = cfg.renderer.gs.bg_color
 
-    # === Loss 配置 ===
+    # === Loss Configuration ===
     tr.loss = ml_collections.ConfigDict()
-    tr.loss.guidance = 1.0      # Contrastive loss 权重
-    tr.loss.reg = 1.0           # velocity 正则化权重
-    tr.loss.reg_type = "v"      # 正则化类型: "v" | "x0" | "x1"
+    tr.loss.guidance = 1.0      # Contrastive loss weight
+    tr.loss.reg = 1.0           # velocity Regularized weight
+    tr.loss.reg_type = "v"      # Regularization type: "v" | "x0" | "x1"
 
-    # ★ Contrastive loss 配置
+    # ★ Contrastive loss Configuration
     tr.loss.contrastive = ml_collections.ConfigDict()
     tr.loss.contrastive.ada = True
     tr.loss.contrastive.eps = 0.1
     tr.loss.contrastive.adaptive_swap = False
-    # 对比 teacher 正/负样本是否使用 CFG（独立于 student_denoise_cfg）
-    # True = teacher 保持 CFG（zeros uncond），False = teacher 不用 CFG
+    # Contrast teacher Right/Whether to use negative samples CFG(independent of student_denoise_cfg)
+    # True = teacher keep CFG(zeros uncond),False = teacher No need CFG
     tr.loss.contrastive.teacher_cfg = True
 
     return cfg

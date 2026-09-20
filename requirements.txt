@@ -1,148 +1,148 @@
-# OREO Dual-Stage TRELLIS 所需的依赖包
-# 已验证的 Qwen/TRELLIS 组合: Python 3.12, PyTorch 2.6.0+cu124, CUDA 12.4
+# OREO Dual-Stage TRELLIS Required dependencies
+# verified Qwen/TRELLIS combination: Python 3.12, PyTorch 2.6.0+cu124, CUDA 12.4
 
-# === 核心深度学习框架 ===
+# === Core deep learning framework ===
 --extra-index-url https://download.pytorch.org/whl/cu124
-torch==2.6.0+cu124        # PyTorch 核心框架
-torchvision==0.21.0+cu124 # 与 torch 2.6.0 对齐
-transformers==4.57.6     # 固定 4.x，禁止静默升级到不兼容的 Transformers 5
-diffusers==0.38.0         # Qwen-Image-Edit-2511 已验证版本
-accelerate==1.4.0         # 分布式训练加速
-safetensors==0.8.0        # 安全张量序列化
-tokenizers==0.22.0        # 与 transformers 4.57.6 对齐
+torch==2.6.0+cu124        # PyTorch core framework
+torchvision==0.21.0+cu124 # with torch 2.6.0 Alignment
+transformers==4.57.6     # fixed 4.x, prohibit silent upgrade to incompatible Transformers 5
+diffusers==0.38.0         # Qwen-Image-Edit-2511 Verified version
+accelerate==1.4.0         # Distributed training acceleration
+safetensors==0.8.0        # Safe tensor serialization
+tokenizers==0.22.0        # with transformers 4.57.6 Alignment
 # build-with-no-isolation: flash-attn==2.7.3
-#   不能由 requirements.txt 直接安装；请按文末步骤在 torch 之后单独编译。
-spconv-cu124==2.3.8       # TRELLIS sparse convolution（import 名为 spconv）
-peft==0.10.0              # 参数高效微调
-huggingface-hub>=0.25.0   # 模型下载/缓存
-omegaconf==2.3.0          # 配置系统（Direct3D‑S2 参考实现依赖）
-absl-py==2.3.1            # 训练脚本与 VGGTObj 使用
+#   cannot be caused by requirements.txt Install directly; please follow the steps at the end of the article. torch Then compile it separately.
+spconv-cu124==2.3.8       # TRELLIS sparse convolution(import named spconv)
+peft==0.10.0              # Efficient fine-tuning of parameters
+huggingface-hub>=0.25.0   # Model download/cache
+omegaconf==2.3.0          # configure system (Direct3D‑S2 See implementation dependencies)
+absl-py==2.3.1            # training script with VGGTObj Use
 
-# === TRELLIS 专用 3D 处理库 ===
-# 注意：安装顺序很重要，建议按以下顺序安装（先安装 torch，再安装 spconv-cu124，再安装本文件其余包）
-trimesh==4.6.13           # 3D 网格处理
-Pillow==10.4.0            # 图像处理（参考推理使用）
-tqdm==4.67.1              # 进度条（参考推理使用）
-open3d==0.17.0            # 3D 数据处理和可视化
-plyfile==1.1.2            # PLY 文件格式支持
-xatlas==0.0.11            # UV 映射工具
-pyvista==0.46.0           # 3D 可视化
-pymeshfix==0.17.1         # 网格修复
-igraph==0.11.9            # 图处理
-kiui==0.2.17              # 3D 视觉工具包（与参考代码依赖兼容）
-git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8  # 3D 工具库（固定提交）
+# === TRELLIS dedicated 3D processing library ===
+# Note: The installation order is very important. It is recommended to install in the following order (install first torch, and then install spconv-cu124, and then install the remaining packages in this file)
+trimesh==4.6.13           # 3D Grid processing
+Pillow==10.4.0            # Image processing (refer to reasoning use)
+tqdm==4.67.1              # Progress bar (refer to reasoning use)
+open3d==0.17.0            # 3D Data processing and visualization
+plyfile==1.1.2            # PLY File format support
+xatlas==0.0.11            # UV Mapping tools
+pyvista==0.46.0           # 3D Visualization
+pymeshfix==0.17.1         # mesh repair
+igraph==0.11.9            # graph processing
+kiui==0.2.17              # 3D Visual Toolkit (compatible with reference code dependencies)
+git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8  # 3D Tool library (fixed commit)
 
-# === 注意力机制 ===
-# 固定的 flash-attn 2.7.3 已在 torch 2.6.0+cu124 环境中编译。
-# 请勿在这个环境中混装 xformers；如需它，请建立独立的锁定环境。
+# === attention mechanism ===
+# fixed flash-attn 2.7.3 Already in torch 2.6.0+cu124 environment to compile.
+# Please do not mix in this environment xformers; If you need it, create a separate locking environment.
 
-# === Direct3D‑S2 可选依赖说明（不自动安装） ===
-# - 参考包 direct3d_s2 放在 `_reference_codes/Direct3D-S2`，需按 SETUP.md 手动安装：
-#   1) pip install -v --no-build-isolation _reference_codes/Direct3D-S2/third_party/voxelize  # 编译 udf_ext
-#   2) pip install -v -e _reference_codes/Direct3D-S2                                        # 安装 direct3d_s2
-# - 若切换到 torchsparse 后端训练，需从源码安装 torchsparse，并可能需要系统包 libsparsehash-dev
+# === Direct3D‑S2 Optional dependency description (not installed automatically) ===
+# - reference package direct3d_s2 put on `_reference_codes/Direct3D-S2`, need to press SETUP.md Manual installation:
+#   1) pip install -v --no-build-isolation _reference_codes/Direct3D-S2/third_party/voxelize  # compile udf_ext
+#   2) pip install -v -e _reference_codes/Direct3D-S2                                        # Install direct3d_s2
+# - If you switch to torchsparse Backend training needs to be installed from source code torchsparse, and may require system packages libsparsehash-dev
 
-# === 图像处理和计算机视觉 ===
-pillow==10.4.0            # 图像处理
-opencv-python-headless==4.11.0.86  # 计算机视觉
-kornia==0.8.1             # StableNormal(BiRefNet) 动态模块依赖
-rembg==2.0.67             # 背景移除
-albumentations==1.4.10    # 图像增强
-albucore==0.0.33          # albumentations 核心
-pymatting==1.1.14         # 图像抠图
-timm==1.0.16              # 预训练视觉模型
-open-clip-torch==2.32.0   # CLIP 模型支持
-lpips==0.1.4              # 感知损失计算
+# === Image processing and computer vision ===
+pillow==10.4.0            # image processing
+opencv-python-headless==4.11.0.86  # computer vision
+kornia==0.8.1             # StableNormal(BiRefNet) Dynamic module dependencies
+rembg==2.0.67             # background removal
+albumentations==1.4.10    # image enhancement
+albucore==0.0.33          # albumentations core
+pymatting==1.1.14         # Image cutout
+timm==1.0.16              # Pretrained vision model
+open-clip-torch==2.32.0   # CLIP Model support
+lpips==0.1.4              # Perceptual loss calculation
 
-# === 3D 渲染和处理 ===
-# nvdiffrast==0.3.3         # NVIDIA 可微分渲染器（与当前环境一致）
+# === 3D Rendering and processing ===
+# nvdiffrast==0.3.3         # NVIDIA Differentiable renderer (consistent with current environment)
 
-# === 性能优化和计算 ===
-triton==3.2.0             # 与 torch 2.6.0 wheel 匹配
-ninja==1.11.1.4           # 编译加速
-numba==0.61.2             # Python 代码加速
-bitsandbytes==0.45.3      # 8-bit 量化优化
+# === Performance optimization and computing ===
+triton==3.2.0             # with torch 2.6.0 wheel match
+ninja==1.11.1.4           # Compilation acceleration
+numba==0.61.2             # Python Code acceleration
+bitsandbytes==0.45.3      # 8-bit Quantitative optimization
 
-# === 科学计算基础库 ===
-numpy==1.26.4             # 数值计算
-scipy==1.15.2             # 科学计算
-matplotlib==3.10.0        # 绘图
-pandas==2.2.3             # 数据处理
-scikit-learn==1.6.1       # 机器学习
+# === Scientific Computing Basic Library ===
+numpy==1.26.4             # Numerical calculation
+scipy==1.15.2             # scientific computing
+matplotlib==3.10.0        # Drawing
+pandas==2.2.3             # Data processing
+scikit-learn==1.6.1       # machine learning
 
-# === 配置和工具管理 ===
-hydra-core==1.3.2         # 配置管理
-omegaconf==2.3.0          # 配置系统  
-ml_collections==1.1.0     # 配置工具
-loguru==0.7.3             # 日志工具
-einops==0.8.1             # 张量操作
-easydict==1.13            # 配置工具
-pydantic==2.10.6          # 数据验证
+# === Configuration and tool management ===
+hydra-core==1.3.2         # Configuration management
+omegaconf==2.3.0          # Configure the system
+ml_collections==1.1.0     # Configuration tool
+loguru==0.7.3             # Logging tool
+einops==0.8.1             # tensor operations
+easydict==1.13            # Configuration tool
+pydantic==2.10.6          # Data validation
 
-# === 实验监控和性能分析 ===
-wandb==0.18.7             # 实验跟踪
-psutil==7.0.0             # 系统监控
-py-cpuinfo==9.0.0         # CPU 信息
-nvidia-ml-py==12.570.86   # NVIDIA GPU 监控
+# === Experiment monitoring and performance analysis ===
+wandb==0.18.7             # Experiment tracking
+psutil==7.0.0             # System monitoring
+py-cpuinfo==9.0.0         # CPU information
+nvidia-ml-py==12.570.86   # NVIDIA GPU Monitor
 
-# === API 和服务 ===
-fastapi==0.115.11         # Web API 框架
-uvicorn==0.34.0           # ASGI 服务器
-aiohttp==3.11.13          # 异步 HTTP 客户端
-requests==2.32.5          # HTTP 客户端（权重与数据下载）
-openai==2.8.1             # Gemini/OpenAI 兼容 VLM 评分器所需 SDK
+# === API and services ===
+fastapi==0.115.11         # Web API frame
+uvicorn==0.34.0           # ASGI server
+aiohttp==3.11.13          # asynchronous HTTP client
+requests==2.32.5          # HTTP Client (weights and data download)
+openai==2.8.1             # Gemini/OpenAI compatible VLM required by grader SDK
 
-# === 数据处理和存储 ===
-pyarrow==20.0.0           # 数据序列化
-fsspec==2024.12.0         # 文件系统抽象
-multiprocess==0.70.16     # 多进程支持
-datasets==3.3.2           # 数据集工具
+# === Data processing and storage ===
+pyarrow==20.0.0           # Data serialization
+fsspec==2024.12.0         # file system abstraction
+multiprocess==0.70.16     # Multi-process support
+datasets==3.3.2           # Dataset tools
 
-# === 其他工具 ===
-onnxruntime==1.22.0       # ONNX 推理
-deepspeed==0.16.4         # 大模型训练优化
+# === Other tools ===
+onnxruntime==1.22.0       # ONNX reasoning
+deepspeed==0.16.4         # Large model training optimization
 
 # ============================================================================
-# 安装说明和注意事项
+# Installation instructions and precautions
 # ============================================================================
 #
-# 1. 环境要求:
+# 1. Environmental requirements:
 #    - Python 3.12
-#    - CUDA 12.4 (与 PyTorch 2.6.0+cu124 及 flash-attn 2.7.3 验证)
-#    - 推荐使用 uv 环境管理
+#    - CUDA 12.4 (with PyTorch 2.6.0+cu124 and flash-attn 2.7.3 verify)
+#    - Recommended uv environmental management
 #
-# 2. 安装顺序 (重要):
+# 2. Installation order (important):
 #    conda create -n grpo3d python=3.12
 #    conda activate grpo3d
-#    
-#    # 先安装 PyTorch (官方 cu124 源)
+#
+#    # Install first PyTorch (official cu124 source)
 #    pip install torch==2.6.0+cu124 torchvision==0.21.0+cu124 \
 #      --index-url https://download.pytorch.org/whl/cu124
-#    
-#    # 再安装3D相关依赖 (顺序重要)
-#    pip install spconv-cu124==2.3.8  # 将自动安装匹配的 cumm-cu124
+#
+#    # Install again3DRelated dependencies (order matters)
+#    pip install spconv-cu124==2.3.8  # will automatically install the matching cumm-cu124
 #    pip install kaolin==0.18.0 -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.6.0_cu124.html
-#    
-#    # 安装 flash-attn (如需自定义架构, 修改 TORCH_CUDA_ARCH_LIST)
+#
+#    # Install flash-attn (If you need a custom schema, Modify TORCH_CUDA_ARCH_LIST)
 #    export TORCH_CUDA_ARCH_LIST="80;86;89;90"
 #    pip install --no-build-isolation flash-attn==2.7.3
-#    # flash-attn 已满足上方的特殊构建声明，再安装其余包
+#    # flash-attn The special build declaration above has been met before installing the remaining packages.
 #    pip install -r requirements.txt
 #
-# 3. 环境变量配置 (关键):
-#    # 如需显式切换后端 (默认直接用 flash-attn 时可忽略)
+# 3. Environment variable configuration (key):
+#    # If you need to explicitly switch backends (Use it directly by default flash-attn can be ignored when)
 #    export ATTN_BACKEND=flash_attn
-#    export SPCONV_ALGO=auto          # 允许 spconv 自动选择 NVRTC，规避大 GEMM 的 int32 上限
-#    export HF_HUB_OFFLINE=1          # 使用本地模型
-#    export CUDA_VISIBLE_DEVICES=0    # 指定GPU
+#    export SPCONV_ALGO=auto          # allow spconv automatic selection NVRTC, to avoid large GEMM of int32 upper limit
+#    export HF_HUB_OFFLINE=1          # Use local model
+#    export CUDA_VISIBLE_DEVICES=0    # SpecifyGPU
 #
-# 4. 使用建议:
-#    # 推荐使用 SETUP.md 中的训练和评估脚本
+# 4. Usage suggestions:
+#    # Recommended SETUP.md training and evaluation scripts in
 #
-# 5. 已知问题:
-#    - 不要将 transformers 升级到 5.x；diffusers 0.38.0 的 Qwen prompt encoding 与其不兼容
-#    - flash-attn 必须针对当前 torch 2.6.0+cu124 环境编译
-#    - kaolin 的 wheel 索引必须与目标 torch 2.6.0 / CUDA 12.4 对齐
+# 5. Known issues:
+#    - don't transformers upgrade to 5.x;diffusers 0.38.0 of Qwen prompt encoding incompatible with it
+#    - flash-attn must be specific to the current torch 2.6.0+cu124 Environment compilation
+#    - kaolin of wheel The index must match the target torch 2.6.0 / CUDA 12.4 Alignment
 #
-# 6. 验证安装:
-#    python -c "import torch, flash_attn, spconv, kaolin; print('✅ 核心依赖安装成功')"
+# 6. Verify installation:
+#    python -c "import torch, flash_attn, spconv, kaolin; print('✅ Core dependencies installed successfully')"

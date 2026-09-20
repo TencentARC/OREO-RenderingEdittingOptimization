@@ -1,16 +1,16 @@
 """
-Dense FlowEdit 评估脚本。
+Dense FlowEdit Evaluation script.
 
-对比两路渲染结果的 CLIP / DINO 相似度：
+Comparing the rendering results of the two passes CLIP / DINO Similarity:
   Teacher (pretrained): Dense ODE → decode_to_coords → Sparse ODE
   Student (finetuned) : Dense ODE → Dense FlowEdit → decode_to_coords → Sparse ODE
 
-与通用 teacher/student 评估脚本的差异：
-  - student 路径在 Stage 1 额外执行 Dense FlowEdit
-  - FlowEdit 参数通过 --config.rollout.flowedit.* 覆盖（或使用默认值）
-  - 不依赖新 config 文件，直接向现有 config 注入 flowedit 子字段
+with universal teacher/student Evaluation script differences:
+  - student The path is in Stage 1 additional execution Dense FlowEdit
+  - FlowEdit parameters passed --config.rollout.flowedit.* Override (or use default)
+  - Not dependent on new config files, directly to existing config Inject flowedit subfield
 
-用法（单卡）：
+Usage (single card):
   python scripts/eval/eval_trellis_dense_flowedit.py \
     --config=config/trellis_oreo.py \
     --config.checkpoint=/path/to/ckpt \
@@ -18,7 +18,7 @@ Dense FlowEdit 评估脚本。
     --config.rollout.flowedit.cfg_scale_tgt=3.0 \
     --config.rollout.flowedit.cfg_scale_src=-3.0
 
-用法（DDP 多卡）：
+Usage (DDP Multi-card):
   accelerate launch scripts/eval/eval_trellis_dense_flowedit.py \
     --config=config/trellis_oreo.py ...
 """
@@ -77,7 +77,7 @@ logger = logging.getLogger(__name__)
 
 
 # =====================================================================
-# FlowEdit 默认参数（可通过 --config.rollout.flowedit.* 覆盖）
+# FlowEdit Default parameters (available via --config.rollout.flowedit.* coverage)
 # =====================================================================
 
 _FE_DEFAULTS = {
@@ -89,9 +89,9 @@ _FE_DEFAULTS = {
 
 
 def _ensure_flowedit_cfg(cfg: ml_collections.ConfigDict) -> None:
-    """若 cfg.rollout.flowedit 不存在则注入默认值。
+    """If cfg.rollout.flowedit If it does not exist, a default value will be injected.
 
-    ml_collections ConfigDict 在 absl 解析后被锁定，必须先 unlock 再添加新 key。
+    ml_collections ConfigDict in absl is locked after parsing, must first unlock Add new key.
     """
     if not hasattr(cfg.rollout, "flowedit"):
         fe = ml_collections.ConfigDict({
@@ -105,7 +105,7 @@ def _ensure_flowedit_cfg(cfg: ml_collections.ConfigDict) -> None:
 
 
 # =====================================================================
-# 工具函数（与通用 teacher/student 评估保持一致）
+# Utility functions (and general teacher/student assessment remains consistent)
 # =====================================================================
 
 def build_eval_dataloader(cfg, accelerator: Accelerator):
@@ -195,7 +195,7 @@ def _load_existing_eval_rows(
     fields: List[str],
     expected_views: int,
 ) -> Tuple[List[Dict[str, Any]], Set[str]]:
-    """读取已有 CSV，返回已写入 rows 和 view 数完整的样本名。"""
+    """Read existing CSV, returns the written rows and view Count the complete sample name."""
     if not csv_path.exists():
         return [], set()
 
@@ -223,7 +223,7 @@ def _load_existing_eval_rows(
 
 
 # =====================================================================
-# EvalMetricLogger（与通用 teacher/student 评估保持一致）
+# EvalMetricLogger(with universal teacher/student assessment remains consistent)
 # =====================================================================
 
 class EvalMetricLogger:
@@ -307,7 +307,7 @@ class EvalMetricLogger:
 
 
 # =====================================================================
-# Student 前向：Dense ODE + Dense FlowEdit + Sparse ODE
+# Student Forward:Dense ODE + Dense FlowEdit + Sparse ODE
 # =====================================================================
 
 def trellis_forward_dense_flowedit(
@@ -317,19 +317,19 @@ def trellis_forward_dense_flowedit(
     device: torch.device,
 ) -> Dict[str, Any]:
     """
-    Student 专用前向：Dense ODE → Dense FlowEdit → decode_to_coords → Sparse ODE → Render
+    Student Dedicated forward:Dense ODE → Dense FlowEdit → decode_to_coords → Sparse ODE → Render
 
-    FlowEdit 参数从 cfg.rollout.flowedit 读取。
+    FlowEdit Parameters from cfg.rollout.flowedit Read.
     """
     pipeline = system.pipeline
     _seed = int(cfg.seed)
 
     # ---- Stage 1: Dense ODE + FlowEdit ----
-    # rollout_dense_flowedit 内部先跑 ODE（CPU gen），再跑 FlowEdit（CUDA gen，种子+1）
+    # rollout_dense_flowedit Run internally first ODE(CPU gen), run again FlowEdit(CUDA gen, seeds+1)
     gen_dense = torch.Generator(device="cpu").manual_seed(_seed)
     with torch.no_grad():
         rollout_dense_flowedit(state, cfg, system, device, generator=gen_dense)
-    # state.stage1.z0 = FlowEdit 编辑后的 dense latent
+    # state.stage1.z0 = FlowEdit edited dense latent
 
     batch_size = state.stage1.z0.shape[0]
     state.coords = pipeline.dense.decode_to_coords(state.stage1.z0, batch_size=batch_size)
@@ -368,7 +368,7 @@ def _dist_barrier(local_rank: int) -> None:
 
 
 # =====================================================================
-# 主流程
+# Main process
 # =====================================================================
 
 def main(argv) -> None:
@@ -376,10 +376,10 @@ def main(argv) -> None:
     cfg = _CONFIG.value
     cfg.eval_only = True
 
-    # 注入 FlowEdit 默认配置（若 config 文件未定义）
+    # Inject FlowEdit Default configuration (if config file is not defined)
     _ensure_flowedit_cfg(cfg)
 
-    # Dense FlowEdit eval 固定使用 360 度 8 视角，避免依赖共享 config 的默认 eval 视角数。
+    # Dense FlowEdit eval Fixed use 360 degree 8 Perspectives to avoid relying on sharing config the default eval Number of viewing angles.
     cfg.data.eval.n_view = 8
     cfg.data.eval.yaw_range = [0.0, 360.0]
     cfg.data.eval.pitch_range = [0.0, 0.0]
@@ -407,14 +407,14 @@ def main(argv) -> None:
         f"pitch_range={list(cfg.data.eval.pitch_range)}"
     )
 
-    # ---- 数据 ----
+    # ---- data ----
     eval_loader = build_eval_dataloader(cfg, accelerator)
 
-    # ---- 构建系统 ----
+    # ---- Build system ----
     system = build_system(cfg, accelerator, guidance_factory=create_guidance)
     system = system.prepare_lora(cfg, adapter="base", load_path=None, clone_from=None)
 
-    # ---- 加载 finetuned checkpoint ----
+    # ---- Load finetuned checkpoint ----
     ckpt_path = cfg.get("checkpoint", "")
     checkpoint_load_report: Optional[Dict[str, Any]] = None
     parameter_diff_reports: List[Dict[str, Any]] = []
@@ -450,19 +450,19 @@ def main(argv) -> None:
         for diff_report in parameter_diff_reports:
             logger.info("[ParamCheck] %s", json.dumps(diff_report, sort_keys=True))
     else:
-        logger.warning("[Checkpoint] 未指定 checkpoint，student 使用 pretrained 权重（与 teacher 相同）")
+        logger.warning("[Checkpoint] unspecified checkpoint,student Use pretrained weight (with teacher same)")
 
-    # ---- 输出目录 ----
+    # ---- Output directory ----
     run_root = Path(cfg.logdir) / (cfg.run_name or "run")
     ckpt_tag = Path(str(ckpt_path).rstrip("/")).name if ckpt_path else "pretrained_baseline"
-    # 区分本脚本与标准 eval
+    # Distinguish this script from the standard eval
     ckpt_tag = ckpt_tag + "_dense_flowedit"
     out_dir = run_root / "eval_teacher_student" / ckpt_tag
     images_dir = out_dir / "images"
     if is_main:
         out_dir.mkdir(parents=True, exist_ok=True)
         images_dir.mkdir(parents=True, exist_ok=True)
-        # 记录 FlowEdit 运行参数
+        # record FlowEdit Operating parameters
         with open(out_dir / "flowedit_params.json", "w") as f:
             json.dump({
                 "steps": int(fe_cfg.steps),
@@ -476,11 +476,11 @@ def main(argv) -> None:
             }, f, indent=2)
     _dist_barrier(local_rank)
 
-    # ---- 指标模型（延迟初始化）----
+    # ---- Indicator model (lazy initialization)----
     clip_m: Optional[CLIPMetric] = None
     dino_m: Optional[DINOMetric] = None
 
-    # ---- 指标记录器 ----
+    # ---- Metrics recorder ----
     metric_keys = [
         "clip_teacher", "clip_student", "clip_delta",
         "dino_teacher", "dino_student", "dino_delta",
@@ -492,12 +492,12 @@ def main(argv) -> None:
     )
     if is_main and existing_rows:
         logger.info(
-            f"[Resume] 发现已有 CSV rows={len(existing_rows)}，"
-            f"完整样本={len(completed_names)}，将跳过完整样本并继续补跑。"
+            f"[Resume] Found that there is already CSV rows={len(existing_rows)},"
+            f"full sample={len(completed_names)}, the complete sample will be skipped and the make-up run will continue."
         )
     el = EvalMetricLogger(out_dir, metric_keys, accelerator, existing_rows=existing_rows)
 
-    # ---- 评估循环 ----
+    # ---- evaluation loop ----
     pipe_models = system.pipeline.pipe.models
     inference_ctx = system.strategy.inference_context() if system.strategy else nullcontext()
 
@@ -529,24 +529,24 @@ def main(argv) -> None:
                 )
                 comp_rgb_stu = render_stu["color"]  # (B,V,H,W,C)
 
-                # === Teacher: 标准 Dense ODE → Sparse ODE（pretrained 权重）===
+                # === Teacher: Standard Dense ODE → Sparse ODE(pretrained weight)===
                 with system.strategy.sparse_teacher_context(), \
                      system.strategy.dense_teacher_context():
                     state_tea = TrellisState()
                     state_tea.attach_batch(batch, pipeline=system.pipeline)
-                    # Teacher 始终用自己的 dense model 重新生成 coords（不共享 student coords）
+                    # Teacher always use your own dense model Regenerate coords(do not share student coords)
                     render_tea = trellis_forward(
                         system, state_tea, cfg, device,
                         global_step=0, is_training=False,
                     )
                 comp_rgb_tea = render_tea["color"]  # (B,V,H,W,C)
 
-            # ---- 延迟初始化指标模型 ----
+            # ---- Lazy initialization indicator model ----
             if clip_m is None:
                 clip_m = CLIPMetric(weight=1.0, device=device)
                 dino_m = DINOMetric(weight=1.0, device=device)
 
-            # ---- 逐样本逐视角计算指标 + 保存图片 ----
+            # ---- Calculate indicators on a sample-by-sample basis + save image ----
             B, V = comp_rgb_stu.shape[:2]
             h, w = comp_rgb_stu.shape[2], comp_rgb_stu.shape[3]
             batch_rows: List[Dict[str, Any]] = []
@@ -594,7 +594,7 @@ def main(argv) -> None:
             del comp_rgb_stu, comp_rgb_tea
             torch.cuda.empty_cache()
 
-    # ---- 汇总 ----
+    # ---- Summary ----
     _dist_barrier(local_rank)
     avg = el.finalize()
 

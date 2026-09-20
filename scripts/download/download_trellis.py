@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-使用 huggingface_hub.snapshot_download 下载 TRELLIS-image-large 到本地
-（默认路径: 项目根/pretrained_weights/TRELLIS-image-large），保持官方目录结构。
+Use huggingface_hub.snapshot_download Download TRELLIS-image-large to local
+(default path: project root/pretrained_weights/TRELLIS-image-large), maintaining the official directory structure.
 
-用法:
+Usage:
     python scripts/download/download_trellis.py [--dest DIR] [--repo-id microsoft/TRELLIS-image-large] [--local-only]
 
-说明:
-- 默认联网下载并利用缓存；如加 --local-only 则仅依赖已有缓存（需缓存完整）。
+Description:
+- By default, the network is downloaded and cached; if added --local-only Then it only relies on the existing cache (the cache needs to be complete).
 """
 
 import argparse
@@ -22,17 +22,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--repo-id",
         default="microsoft/TRELLIS-image-large",
-        help="HuggingFace 仓库名，默认 microsoft/TRELLIS-image-large",
+        help="HuggingFace Warehouse name, default microsoft/TRELLIS-image-large",
     )
     parser.add_argument(
         "--dest",
         default=None,
-        help="下载目录，默认项目根/pretrained_weights/TRELLIS-image-large",
+        help="Download directory, default project root/pretrained_weights/TRELLIS-image-large",
     )
     parser.add_argument(
         "--local-only",
         action="store_true",
-        help="仅使用本地缓存（不联网）；缓存需完整，否则会报错",
+        help="Only use local cache (not connected to the Internet); the cache must be complete, otherwise an error will be reported",
     )
     return parser.parse_args()
 
@@ -47,7 +47,7 @@ def main() -> None:
     print(f"Repo: {args.repo_id}")
     print(f"Dest: {dest}")
 
-    # 启用 HF transfer 以提升下载速度
+    # enable HF transfer to increase download speed
     os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 
     snapshot_download(
@@ -58,7 +58,7 @@ def main() -> None:
         local_files_only=bool(args.local_only),
     )
     print(f"✅ Downloaded {args.repo_id} to {dest}")
-    print(f"config.pretrained.model 可指向: {dest}")
+    print(f"config.pretrained.model Pointable: {dest}")
 
 
 if __name__ == "__main__":

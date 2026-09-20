@@ -1,32 +1,32 @@
 """
-Guidance 模块。
+Guidance module.
 
-提供 retained FlowEdit Guidance，用于 3D 生成训练：
-- FlowEdit: 编辑图像 → 计算 latent/pixel loss
+provide retained FlowEdit Guidance, used for 3D Generate training:
+- FlowEdit: Edit image → Calculate latent/pixel loss
 
-主要接口：
-- create_guidance(cfg, train_device, use_pp): 创建普通 FlowEdit Guidance 实例
-- GuidanceResult: 统一的返回结果格式
-- BaseGuidance: 抽象基类
+Main interface:
+- create_guidance(cfg, train_device, use_pp): create normal FlowEdit Guidance Example
+- GuidanceResult: Unified return result format
+- BaseGuidance: abstract base class
 
-设备分配：
-- Guidance 模型自动运行在 train_device + 1 的 GPU 上
-- 例如：训练在 cuda:0，则 Guidance 在 cuda:1
+Equipment allocation:
+- Guidance The model automatically runs on train_device + 1 of GPU on
+- For example: training in cuda:0, then Guidance in cuda:1
 
-所有 Guidance 统一使用真 Loss 模式：
-- Pipeline 返回 Tracker（包含 x0 / z_edits 等状态）
-- 通过 Tracker.loss(src) 计算真 loss
-- 直接 loss.backward()，无需 SpecifyGradient
+all Guidance Use true uniformly Loss Mode:
+- Pipeline Return Tracker(includes x0 / z_edits etc.)
+- Pass Tracker.loss(src) Compute true loss
+- direct loss.backward(), no need SpecifyGradient
 
 Usage:
     from oreo.guidance import create_guidance
-    
+
     guidance = create_guidance(cfg.guidance, accelerator.device)
     result = guidance.compute_guidance(
         comp_rgb, condition_images,
         guidance_cfg=cfg.shape.guidance,
     )
-    result.loss.backward()  # 统一使用 result.loss
+    result.loss.backward()  # Use uniformly result.loss
 """
 
 from oreo.guidance.base import (

@@ -1,22 +1,22 @@
 """
-RolloutTracker: 三阶段 Autograd 架构的 cond-level proxy 记录器。
+RolloutTracker: three stages Autograd architectural cond-level proxy logger.
 
-Phase 1 写入轨迹 + 提前计算 reg 梯度，Phase 2 backward 填充 guidance .grad，Phase 3 合并消费。
+Phase 1 Write track + Calculate in advance reg gradient,Phase 2 backward padding guidance .grad,Phase 3 Combine consumption.
 
-proxy 建在 cond_pred 上（CFG 之前），CFG 混合在 proxy 之后进行。
+proxy built in cond_pred on (CFG before),CFG mixed in proxy Proceed afterwards.
 
-reg 梯度在 Phase 1 通过 torch.autograd.grad 提前算好，存入 reg_grads（纯数据，无图），
-与 Phase 2 的 guidance backward 完全解耦。即使 Phase 2 OOM，reg 梯度仍可用。
+reg gradient in Phase 1 Pass torch.autograd.grad Calculate it in advance and deposit it reg_grads(Pure data, no pictures),
+with Phase 2 of guidance backward Completely decoupled. Even if Phase 2 OOM,reg Gradient is still available.
 
-数据流:
-  Phase 1  → 写入 input_trajectory / output_trajectory / timesteps
-             + 计算 reg_loss → autograd.grad → reg_grads（纯数据，存 tracker）
-             + reg_loss_val（标量，日志用）
-  Phase 2a → slat(含 proxy chain) → decoder → renderer → comp_rgb
+data flow:
+  Phase 1  → write input_trajectory / output_trajectory / timesteps
+             + Calculate reg_loss → autograd.grad → reg_grads(Pure data, stored tracker)
+             + reg_loss_val(scalar, for logging)
+  Phase 2a → slat(Contains proxy chain) → decoder → renderer → comp_rgb
   Phase 2  → comp_rgb.backward(rgb_grad)
-             → 填充 output_trajectory[t].grad（仅 guidance 梯度，含 CFG 因子）
+             → padding output_trajectory[t].grad(only guidance Gradient, including CFG factor)
   Phase 3  → v_grad = guidance_grad + reg_weight * reg_grad
-             → 仅重算 cond f_θ 并即时 VJP backward（无需 uncond/CFG/reg）
+             → Recalculate only cond f_θ and instant VJP backward(No need uncond/CFG/reg)
 """
 
 from dataclasses import dataclass, field
@@ -28,62 +28,62 @@ import torch
 @dataclass
 class RolloutTracker:
     """
-    Rollout 过程中的 proxy 记录器 — Phase 间的自包含数据传递载体。
+    Rollout in process proxy logger — Phase Self-contained data transfer carrier between.
 
-    无 slat_proxy 中间层：decode/render 直接连接带 proxy chain 的 slat，
-    guidance backward 沿 renderer → decoder → slat → scheduler → CFG → cond_proxy.grad。
+    None slat_proxy Middle layer:decode/render direct connection strap proxy chain of slat,
+    guidance backward along renderer → decoder → slat → scheduler → CFG → cond_proxy.grad.
 
     Attributes:
         input_trajectory:  T × (N, C)
-            每步 x_t.feats.detach().clone()
-            Phase 3 重算 f_θ 时的输入快照。
+            every step x_t.feats.detach().clone()
+            Phase 3 Recalculate f_θ Input snapshot at time.
         output_trajectory: T × (N, C)
-            每步 cond_pred.feats.detach().clone().requires_grad_(True)
-            ★ 条件 velocity proxy（不是 CFG 后的 velocity）。
-            proxy 建在 cond_pred 上，CFG 混合在 proxy 之后进行，
-            Phase 2 guidance backward 沿 CFG chain 反传 → .grad 含 CFG 缩放因子。
-            Phase 3 合并 reg_grads 后做 VJP，无需 uncond / CFG 混合 / reg 计算。
+            every step cond_pred.feats.detach().clone().requires_grad_(True)
+            ★ Conditions velocity proxy(not CFG later velocity).
+            proxy built in cond_pred Up,CFG mixed in proxy After that,
+            Phase 2 guidance backward along CFG chain Backpass → .grad Contains CFG scaling factor.
+            Phase 3 merge reg_grads do later VJP, no need uncond / CFG mix / reg Calculate.
         timesteps: T × float
-            每步的精确 t_val（0~1 范围，float64 精度）。
-            Phase 3 直接读取，无需重建 scheduler。
-        reg_grads: T × (N, C) 或空列表
-            Phase 1 通过 autograd.grad(reg_loss, proxies) 提前计算的 reg 梯度。
-            纯数据（detach），不依赖任何计算图，Phase 2 OOM 也不受影响。
-            Phase 3 合并: v_grad = guidance_grad + reg_weight * reg_grad。
+            Precision in every step t_val(0~1 range,float64 accuracy).
+            Phase 3 Read directly without rebuilding scheduler.
+        reg_grads: T × (N, C) or empty list
+            Phase 1 Pass autograd.grad(reg_loss, proxies) calculated in advance reg gradient.
+            pure data (detach), does not rely on any calculation graph,Phase 2 OOM Not affected either.
+            Phase 3 merge: v_grad = guidance_grad + reg_weight * reg_grad.
         reg_loss_val: float
-            reg loss 标量值，用于日志记录。
+            reg loss Scalar value used for logging.
     """
 
-    # Phase 1 写入：rollout 每步的输入/输出快照 + 时间步
+    # Phase 1 Write:rollout input for each step/Output snapshot + time step
     input_trajectory: List[torch.Tensor] = field(default_factory=list)
     output_trajectory: List[torch.Tensor] = field(default_factory=list)
-    #   ★ 存 cond_pred proxy（CFG 之前），.grad 由 Phase 2 guidance backward 填充
+    #   ★ save cond_pred proxy(CFG before),.grad by Phase 2 guidance backward padding
     timesteps: List[float] = field(default_factory=list)
 
-    # Phase 1 写入：reg 梯度（提前计算，与 Phase 2 解耦）
+    # Phase 1 Write:reg gradient (computed in advance, with Phase 2 decoupling)
     reg_grads: List[torch.Tensor] = field(default_factory=list)
-    #   ★ 纯数据（detach），Phase 2 OOM 也不丢失
+    #   ★ pure data (detach),Phase 2 OOM Not lost either
     reg_loss_val: Optional[float] = None
-    #   ★ reg loss 标量值，日志用
+    #   ★ reg loss Scalar value, used for logging
 
     def collect_log(self, reg_weight: float = 1.0) -> Dict[str, float]:
         """
-        收集 tracker 中所有可日志化的指标。
+        collect tracker All logging indicators in .
 
-        在 VJP 循环前调用（Phase 2c backward 已填充 .grad，Phase 1 已填充 reg_grads）。
+        in VJP Call before loop (Phase 2c backward Filled .grad,Phase 1 Filled reg_grads).
 
         Args:
-            reg_weight: reg 梯度权重（用于计算有效梯度 norm，对齐 guidance 梯度的尺度）。
-                        guidance 梯度已含 guidance_weight（Phase 2b backward 内嵌），
-                        reg 梯度是原始值，需乘 reg_weight 才与 guidance 同尺度。
-                        默认 1.0（即报告原始 reg 梯度 norm）。
+            reg_weight: reg Gradient weights (used to calculate effective gradients norm, align guidance gradient scale).
+                        guidance Gradient included guidance_weight(Phase 2b backward embedded),
+                        reg The gradient is the original value, which needs to be multiplied by reg_weight Talent and guidance Same scale.
+                        Default 1.0(i.e. reporting the original reg gradient norm).
 
         Returns:
-            日志字典，可能包含：
-            - loss/reg:           reg loss 标量值
-            - grad_norm/guidance: guidance 梯度平均 L2 范数（proxy 级，含 guidance_weight）
-            - grad_norm/reg:     reg 梯度平均 L2 范数（proxy 级，乘 reg_weight 后）
-            - grad_norm/ratio:   guidance / reg 有效梯度范数比
+            Log dictionary, which may contain:
+            - loss/reg:           reg loss scalar value
+            - grad_norm/guidance: guidance Gradient average L2 norm (proxy level, including guidance_weight)
+            - grad_norm/reg:     reg Gradient average L2 norm (proxy level, multiply reg_weight after)
+            - grad_norm/ratio:   guidance / reg Effective gradient norm ratio
         """
         log: Dict[str, float] = {}
 
@@ -91,7 +91,7 @@ class RolloutTracker:
         if self.reg_loss_val is not None:
             log["loss/reg"] = self.reg_loss_val
 
-        # ---- 梯度 norm ----
+        # ---- gradient norm ----
         T = len(self.timesteps)
         has_reg = len(self.reg_grads) == T
 
@@ -104,7 +104,7 @@ class RolloutTracker:
                 continue
             guid_norms.append(g.norm().item())
             if has_reg and reg_weight != 0:
-                # ★ 乘 reg_weight，对齐 guidance 梯度的尺度（含 guidance_weight）
+                # ★ multiply reg_weight, align guidance The scale of the gradient (including guidance_weight)
                 reg_norms.append((reg_weight * self.reg_grads[i]).norm().item())
 
         if guid_norms:
@@ -119,43 +119,43 @@ class RolloutTracker:
 
 
 # =====================================================================
-# VelocityTracker: FlowEdit 单步去噪的 velocity proxy 记录器
+# VelocityTracker: FlowEdit single step denoising velocity proxy logger
 # =====================================================================
 
 @dataclass
 class VelocityTracker:
     """
-    FlowEdit 单步去噪的 velocity proxy 记录器。
+    FlowEdit single step denoising velocity proxy logger.
 
-    在 velocity 空间建立 proxy leaf，分别追踪 guidance 和 reg（KL）梯度。
-    日志 key 与 RolloutTracker.collect_log 一致：
+    in velocity Space creation proxy leaf, track separately guidance and reg(KL) gradient.
+    Log key with RolloutTracker.collect_log Consistent:
       loss/reg, grad_norm/guidance, grad_norm/reg, grad_norm/ratio
 
-    数据流:
-      P3   → predict_velocity_student → v_student (有 autograd 图到 θ)
+    data flow:
+      P3   → predict_velocity_student → v_student (Yes autograd Picture arrived θ)
              setup_proxy(v_student) → v_proxy = v_student.detach().requires_grad_(True)
-      P3.5 → (可选) predict_velocity_teacher → v_teacher (detached)
+      P3.5 → (Optional) predict_velocity_teacher → v_teacher (detached)
              reg_loss = mse(v_proxy, v_teacher) → backward → v_proxy.grad = reg_grad
-             存 reg_grad，清零 v_proxy.grad
+             save reg_grad, clear v_proxy.grad
       P4c  → comp_rgb.backward(rgb_grad) → v_proxy.grad = guidance_grad
       P5   → relay_and_backward: v_student.backward(v_proxy.grad + reg_grad) → θ.grad
     """
 
-    # P3 写入
-    v_student: Optional[torch.Tensor] = None     # (N,C), 有 autograd 图到 θ
+    # P3 write
+    v_student: Optional[torch.Tensor] = None     # (N,C), Yes autograd Picture arrived θ
     v_proxy: Optional[torch.Tensor] = None       # (N,C), detach leaf
 
-    # P3.5 写入（reg_weight > 0 时）
+    # P3.5 write(reg_weight > 0 time)
     reg_grad: Optional[torch.Tensor] = None      # (N,C), detached
-    reg_loss_val: Optional[float] = None          # 标量
+    reg_loss_val: Optional[float] = None          # scalar
 
     def setup_proxy(self, v_student: torch.Tensor):
-        """P3：保存 v_student，创建 proxy leaf。"""
+        """P3:Save v_student, create proxy leaf."""
         self.v_student = v_student
         self.v_proxy = v_student.detach().requires_grad_(True)
 
     def relay_and_backward(self):
-        """P5：合并 guidance + reg 梯度，一次 backward 到 θ。"""
+        """P5: merge guidance + reg gradient, once backward Arrive θ."""
         total_grad = self.v_proxy.grad
         if self.reg_grad is not None:
             total_grad = total_grad + self.reg_grad
@@ -163,17 +163,17 @@ class VelocityTracker:
 
     def collect_log(self, reg_weight: float = 0.0) -> Dict[str, float]:
         """
-        收集梯度 norm 日志，key 与 RolloutTracker.collect_log 一致。
+        Collect gradients norm log,key with RolloutTracker.collect_log consistent.
 
         Args:
-            reg_weight: reg 权重（仅用于日志参考，reg_grad 已含权重）。
+            reg_weight: reg weight (for log reference only,reg_grad weight included).
 
         Returns:
-            日志字典，可能包含：
-            - loss/reg:           reg loss 标量值
-            - grad_norm/guidance: guidance 梯度 L2 范数（v_proxy 级）
-            - grad_norm/reg:     reg 梯度 L2 范数（v_proxy 级）
-            - grad_norm/ratio:   guidance / reg 梯度范数比
+            Log dictionary, which may contain:
+            - loss/reg:           reg loss scalar value
+            - grad_norm/guidance: guidance gradient L2 norm (v_proxy level)
+            - grad_norm/reg:     reg gradient L2 norm (v_proxy level)
+            - grad_norm/ratio:   guidance / reg gradient norm ratio
         """
         log: Dict[str, float] = {}
 
@@ -181,13 +181,13 @@ class VelocityTracker:
         if self.reg_loss_val is not None:
             log["loss/reg"] = self.reg_loss_val
 
-        # grad_norm/guidance — v_proxy.grad（P4c backward 填充）
+        # grad_norm/guidance — v_proxy.grad(P4c backward padding)
         guid_norm = 0.0
         if self.v_proxy is not None and self.v_proxy.grad is not None:
             guid_norm = self.v_proxy.grad.norm().item()
             log["grad_norm/guidance"] = guid_norm
 
-        # grad_norm/reg — reg_grad（P3.5 backward 填充）
+        # grad_norm/reg — reg_grad(P3.5 backward padding)
         reg_norm = 0.0
         if self.reg_grad is not None:
             reg_norm = self.reg_grad.norm().item()

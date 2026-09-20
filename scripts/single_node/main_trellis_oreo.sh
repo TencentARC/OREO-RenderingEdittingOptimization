@@ -1,14 +1,14 @@
 #!/bin/bash
-# TRELLIS Dual-Stage (Sparse + Dense) Contrastive FlowEdit 训练脚本（单机版）
+# TRELLIS Dual-Stage (Sparse + Dense) Contrastive FlowEdit Training script (stand-alone version)
 #
-# GPU 分配策略（共享模式）：
-# - 全部 N 张卡同时用于 Trellis 训练 (DDP) 和 Guidance (FlowEdit)
+# GPU Allocation strategy (shared mode):
+# - All N cards used simultaneously Trellis training (DDP) and Guidance (FlowEdit)
 #
-# 使用示例：
-# - 单卡训练：export CUDA_VISIBLE_DEVICES=0
-# - 2卡训练：export CUDA_VISIBLE_DEVICES=0,1
+# Usage example:
+# - Single card training:export CUDA_VISIBLE_DEVICES=0
+# - 2Card training:export CUDA_VISIBLE_DEVICES=0,1
 
-# 计算训练卡数
+# Calculate the number of training cards
 : "${CUDA_VISIBLE_DEVICES:=0}"
 export CUDA_VISIBLE_DEVICES
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -17,11 +17,11 @@ TRAIN_GPU_COUNT=$GPU_COUNT
 RUN_NAME="${RUN_NAME:-trellis_oreo}"
 
 echo "========================================"
-echo "GPU 分配信息"
+echo "GPU allocation information"
 echo "========================================"
-echo "可见 GPU: $CUDA_VISIBLE_DEVICES ($GPU_COUNT 张)"
-echo "训练进程数: $TRAIN_GPU_COUNT"
-echo "训练 + Guidance: cuda:0-$((GPU_COUNT-1))（共享同一设备）"
+echo "visible GPU: $CUDA_VISIBLE_DEVICES ($GPU_COUNT Zhang)"
+echo "Number of training processes: $TRAIN_GPU_COUNT"
+echo "training + Guidance: cuda:0-$((GPU_COUNT-1))(share the same device)"
 echo "========================================"
 
 python -m accelerate.commands.launch \

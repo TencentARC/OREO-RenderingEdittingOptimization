@@ -18,7 +18,7 @@ def download_hf(repo: str, dest: str, revision: str = "main") -> None:
 
 
 def warm_torchhub(repo: str, entry: str, torch_home: str) -> None:
-    os.environ["TORCH_HUB_DISABLE_NETWORK"] = "0"  # 允许联网以便预热
+    os.environ["TORCH_HUB_DISABLE_NETWORK"] = "0"  # Allow networking for warm-up
     os.environ["TORCH_HOME"] = os.path.expanduser(torch_home)
     hub_root = Path(os.environ["TORCH_HOME"]) / "hub"
     (hub_root / "checkpoints").mkdir(parents=True, exist_ok=True)
@@ -48,11 +48,11 @@ def main():
         default="torchhub",
         help="hf: HuggingFace snapshot; torchhub: warm torch.hub cache",
     )
-    # HF 参数
+    # HF parameters
     parser.add_argument("--repo", default="facebook/dinov2-giant", help="[hf] HF repo id or local path")
     parser.add_argument("--dest", default="pretrained_weights/dinov2-giant", help="[hf] local destination dir")
     parser.add_argument("--revision", default="main", help="[hf] repo revision")
-    # TorchHub 预热参数
+    # TorchHub Preheating parameters
     parser.add_argument("--hub_repo", default="facebookresearch/dinov2", help="[torchhub] torch.hub repo, e.g. facebookresearch/dinov2")
     parser.add_argument("--entry", default="dinov2_vitl14_reg", help="[torchhub] entry for torch.hub.load")
     parser.add_argument("--torch_home", default="~/.cache/torch", help="[torchhub] TORCH_HOME for hub cache")

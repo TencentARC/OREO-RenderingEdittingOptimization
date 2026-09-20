@@ -51,7 +51,7 @@ VAE_IMAGE_SIZE = 1024 * 1024
 class FlowEditPipelineOutput(BaseOutput):
     """
     Output class for FlowEdit pipeline.
-    
+
     Args:
         images: Generated images (PIL or tensor)
         latents: Edited latents in packed format [B, seq_len, C]
@@ -71,7 +71,7 @@ class FlowEditPipelineOutput(BaseOutput):
 class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
     """
     FlowEdit pipeline for image editing using differential velocity fields.
-    
+
     Inherits from QwenImageEditPlusPipeline and overrides __call__ with FlowEdit algorithm.
     This version uses full model inference for both source and target branches.
     """
@@ -84,20 +84,20 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
         output_type: str = "pil",
     ):
         """
-        将 packed latent 解码为图像。
-        
+        will packed latent Decoded into image.
+
         Args:
             latent: packed latent (B, seq_len, C)
-            height: 图像高度
-            width: 图像宽度
-            output_type: 输出类型 ("pil" 或 "pt")
-        
+            height: image height
+            width: image width
+            output_type: Output type ("pil" or "pt")
+
         Returns:
-            解码后的图像 (PIL.Image 列表或 tensor)
+            decoded image (PIL.Image list or tensor)
         """
         latents = self._unpack_latents(latent, height, width, self.vae_scale_factor)
         latents = latents.to(self.vae.dtype)
-        
+
         latents_mean = (
             torch.tensor(self.vae.config.latents_mean)
             .view(1, self.vae.config.z_dim, 1, 1, 1)
@@ -107,10 +107,10 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
             latents.device, latents.dtype
         )
         latents = latents / latents_std + latents_mean
-        
+
         image = self.vae.decode(latents, return_dict=False)[0][:, :, 0]
         image = self.image_processor.postprocess(image, output_type=output_type)
-        
+
         return image
 
     @torch.no_grad()
@@ -143,14 +143,14 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
         true_cfg_scale_src: float = 1.5,
         true_cfg_scale_tgt: float = 5.5,
         n_max: int = 20,
-        noise_mode: str = "aligned",  # 噪声更新模式："random" / "fixed" / "aligned"
-        src_latent: Optional[torch.Tensor] = None,  # 预编码的 src latent [B, seq_len, C]，用于可导编码
-        use_tgt_record: bool = True,   # 是否记录 target 分支的 x0 正负对
-        use_src_record: bool = False,  # 是否记录 source 分支的 x0 正负对
-        # CSD 正/负样本模式
-        csd_pos_mode: str = "cond",        # CSD 正样本来源: "cond" | "cfg" | "cfg_rescale"
-        csd_neg_mode: str = "uncond",      # CSD 负样本来源: "uncond" | "cond"
-        remove_tgt_neg: bool = False,      # 是否用 src 分支的 x0_neg 替换 tgt 分支的 x0_neg
+        noise_mode: str = "aligned",  # Noise update mode:"random" / "fixed" / "aligned"
+        src_latent: Optional[torch.Tensor] = None,  # precoded src latent [B, seq_len, C], for differentiable coding
+        use_tgt_record: bool = True,   # Whether to record target branched x0 Positive and negative pairs
+        use_src_record: bool = False,  # Whether to record source branched x0 Positive and negative pairs
+        # CSD Right/Negative sample mode
+        csd_pos_mode: str = "cond",        # CSD Positive sample source: "cond" | "cfg" | "cfg_rescale"
+        csd_neg_mode: str = "uncond",      # CSD Negative sample source: "uncond" | "cond"
+        remove_tgt_neg: bool = False,      # Whether to use src branched x0_neg replace tgt branched x0_neg
     ):
         """
         FlowEdit pipeline for image editing with full dual-branch model inference.
@@ -164,11 +164,11 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
             true_cfg_scale_src: CFG scale for source branch.
             true_cfg_scale_tgt: CFG scale for target branch.
             n_max: FlowEdit step range control.
-            use_tgt_record: 是否将 target 分支的 x0 预测记录到 tracker（默认 True）
-            use_src_record: 是否将 source 分支的 x0 预测记录到 tracker（默认 False）
-            csd_pos_mode: CSD 正样本来源 ("cond" | "cfg" | "cfg_rescale")
-            csd_neg_mode: CSD 负样本来源 ("uncond" | "cond")
-            remove_tgt_neg: 是否用 src 分支的 x0_neg 替换 tgt 分支的 x0_neg（默认 False）
+            use_tgt_record: whether to target branched x0 Forecast recorded to tracker(Default True)
+            use_src_record: whether to source branched x0 Forecast recorded to tracker(Default False)
+            csd_pos_mode: CSD Positive sample source ("cond" | "cfg" | "cfg_rescale")
+            csd_neg_mode: CSD Negative sample source ("uncond" | "cond")
+            remove_tgt_neg: Whether to use src branched x0_neg replace tgt branched x0_neg(Default False)
         """
         # Calculate dimensions from image
         image_size = image[-1].size if isinstance(image, list) else image.size
@@ -236,7 +236,7 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
         if true_cfg_scale_tgt > 1 and not has_neg_prompt_tgt:
             logger.warning("true_cfg_scale_tgt > 1 but negative_prompt_tgt is not provided.")
 
-        # Prepare images for VLM encoding（固定使用条件图 index=1）
+        # Prepare images for VLM encoding(Fixed usage condition diagram index=1)
         cond_images = [condition_images[1]]
 
         do_true_cfg_src = has_neg_prompt_src and true_cfg_scale_src != 1
@@ -245,7 +245,7 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
         assert do_true_cfg_src, "FlowEdit requires CFG for source branch (provide negative_prompt_src and true_cfg_scale_src != 1)"
         assert do_true_cfg_tgt, "FlowEdit requires CFG for target branch (provide negative_prompt_tgt and true_cfg_scale_tgt > 1)"
 
-        # 检测 prompt 是否与对应的 negative_prompt 相同（用于复用 embedding 和跳过 uncond 推理）
+        # Detection prompt Whether it corresponds to negative_prompt Same (for reuse embedding and skip uncond reasoning)
         src_neg_same = (source_prompt == negative_prompt_src)
         tgt_neg_same = (target_prompt == negative_prompt_tgt)
 
@@ -260,7 +260,7 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
 
         if do_true_cfg_src:
             if src_neg_same:
-                # source_prompt == negative_prompt_src，复用 source embedding
+                # source_prompt == negative_prompt_src, reuse source embedding
                 negative_prompt_embeds_src = prompt_embeds_src
                 negative_prompt_embeds_mask_src = prompt_embeds_mask_src
             else:
@@ -285,7 +285,7 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
 
         if do_true_cfg_tgt:
             if tgt_neg_same:
-                # target_prompt == negative_prompt_tgt，复用 target embedding
+                # target_prompt == negative_prompt_tgt, reuse target embedding
                 negative_prompt_embeds_tgt = prompt_embeds_tgt
                 negative_prompt_embeds_mask_tgt = prompt_embeds_mask_tgt
             else:
@@ -329,17 +329,17 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
 
         # Extract base latent for editing (clean latent, not noise)
         if src_latent is not None:
-            # 使用外部传入的预编码 latent（可导版本）替换 x_src
+            # Use external incoming precode latent(Exportable version) Replacement x_src
             x_src = src_latent.clone()  # shape: [B, seq_len, C]
         else:
-            # 原来的逻辑：使用 pipeline 内部编码的 latent
-            x_src = all_latents_list[0].clone()  # 渲染图的 latent, shape: [B, seq_len, C]
+            # Original logic: use pipeline internally encoded latent
+            x_src = all_latents_list[0].clone()  # rendering latent, shape: [B, seq_len, C]
         z_edit = x_src.clone()  # shape: [B, seq_len, C]
 
         # Helper to construct model inputs based on indices
         def get_latent_model_input_and_img_shapes(z_t):
-            # 1. Concat condition latent（固定使用条件图 index=1）
-            cond_latent = all_latents_list[1]  # 条件图的 latent
+            # 1. Concat condition latent(Fixed usage condition diagram index=1)
+            cond_latent = all_latents_list[1]  # conditional diagram latent
             latent_model_input = torch.cat([z_t, cond_latent], dim=1)
 
             # 2. Construct img_shapes
@@ -350,7 +350,7 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
 
             return latent_model_input, [img_shapes] * batch_size
 
-        # 5. Prepare timesteps（公共流程：sigmas + mu-shift + retrieve_timesteps）
+        # 5. Prepare timesteps(Public process:sigmas + mu-shift + retrieve_timesteps)
         sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
         image_seq_len = x_src.shape[1]
         mu = calculate_shift(
@@ -391,9 +391,9 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
         # 6. FlowEdit Loop
         self.scheduler.set_begin_index(0)
 
-        # 初始化 StateTracker
-        # tracker: 主 tracker（噪声管理 + tgt 记录）
-        # tracker_src: src 分支独立记录器（仅当 use_src_record 时创建）
+        # initialization StateTracker
+        # tracker: Lord tracker(Noise Management + tgt record)
+        # tracker_src: src branch independent logger (only if use_src_record created when)
         tracker = StateTracker(height=height, width=width)
         tracker.init(x_src, mode=noise_mode)  # [B, seq_len, C]
         tracker_src = StateTracker(height=height, width=width) if use_src_record else None
@@ -404,7 +404,7 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
                     continue
 
                 # FlowEdit Step Logic
-                # Skip initial steps if n_max set（两种模式都跳过）
+                # Skip initial steps if n_max set(skip in both modes)
                 if num_inference_steps - i > n_max:
                     progress_bar.update()
                     continue
@@ -415,7 +415,7 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
                 dt = t_prev - t_curr  # []
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)  # [B]
 
-                # ========== FlowEdit 差分采样阶段 ==========
+                # ========== FlowEdit Differential sampling stage ==========
                 # 1. Source Branch (Full Model Inference)
                 noise = tracker.get_noise(x_src)  # [B, seq_len, C]
                 latents_src = (1 - t_curr) * x_src + t_curr * noise  # [B, seq_len, C]
@@ -438,7 +438,7 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
                     v_cond_src = v_cond_src[:, :x_src.shape[1]]  # [B, seq_len, C]
 
                 if do_true_cfg_src and not src_neg_same:
-                    # 仅当 source_prompt != negative_prompt_src 时才需要 uncond 推理
+                    # only if source_prompt != negative_prompt_src only needed uncond reasoning
                     with self.transformer.cache_context("uncond"):
                         v_uncond_src = self.transformer(
                             hidden_states=latent_model_input_src,
@@ -458,7 +458,7 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
                     cfg_norm_src = torch.norm(comb_pred_src, dim=-1, keepdim=True)  # [B, seq_len, 1]
                     v_cfg_src = comb_pred_src * (cond_norm_src / cfg_norm_src)  # [B, seq_len, C]
                 else:
-                    # 无 CFG 时，三者相同
+                    # None CFG When, the three are the same
                     v_uncond_src = v_cond_src
                     v_cfg_src = v_cond_src
 
@@ -483,7 +483,7 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
                     v_cond_tgt = v_cond_tgt[:, :x_src.shape[1]]  # [B, seq_len, C]
 
                 if do_true_cfg_tgt and not tgt_neg_same:
-                    # 仅当 target_prompt != negative_prompt_tgt 时才需要 uncond 推理
+                    # only if target_prompt != negative_prompt_tgt only needed uncond reasoning
                     with self.transformer.cache_context("uncond"):
                         v_uncond_tgt = self.transformer(
                             hidden_states=latent_model_input_tgt,
@@ -503,19 +503,19 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
                     cfg_norm_tgt = torch.norm(comb_pred_tgt, dim=-1, keepdim=True)  # [B, seq_len, 1]
                     v_cfg_tgt = comb_pred_tgt * (cond_norm_tgt / cfg_norm_tgt)  # [B, seq_len, C]
                 else:
-                    # 无 CFG 时，三者相同
+                    # None CFG When, the three are the same
                     v_uncond_tgt = v_cond_tgt
                     v_cfg_tgt = v_cond_tgt
 
                 # 3. Update z_edit (Euler step)
                 v_delta = v_cfg_tgt - v_cfg_src  # [B, seq_len, C]
                 z_edit = z_edit + dt * v_delta   # [B, seq_len, C]
-                
-                # 更新噪声：aligned 模式 ε -= (v_cond - v_uncond) * (1 - t)
-                #          delta 模式 ε -= v_delta * dt
+
+                # Update noise:aligned mode ε -= (v_cond - v_uncond) * (1 - t)
+                #          delta mode ε -= v_delta * dt
                 tracker.update(v_cond_tgt, v_uncond_tgt, v_cfg_tgt, float(t_curr), float(dt), v_delta=v_delta)
-                
-                # 构建 x0 预测映射（两个分支）
+
+                # build x0 Predictive mapping (two branches)
                 _x0_map_tgt = {
                     "cond": latents_tgt - t_curr * v_cond_tgt,          # [B, seq_len, C]
                     "uncond": latents_tgt - t_curr * v_uncond_tgt,      # [B, seq_len, C]
@@ -529,13 +529,13 @@ class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
                     "cfg_rescale": latents_src - t_curr * v_cfg_src,    # [B, seq_len, C]
                 }
 
-                # 记录 tgt 分支的 x0 正负对 → tracker
+                # record tgt branched x0 Positive and negative pairs → tracker
                 if use_tgt_record:
                     x0_pos_tgt = _x0_map_tgt[csd_pos_mode]  # [B, seq_len, C]
                     x0_neg_tgt = _x0_map_src[csd_neg_mode] if remove_tgt_neg else _x0_map_tgt[csd_neg_mode]  # [B, seq_len, C]
                     tracker.record(z_edit, float(t_curr), x0_pos_tgt, x0_neg_tgt)
-                
-                # 记录 src 分支的 x0 正负对 → tracker_src
+
+                # record src branched x0 Positive and negative pairs → tracker_src
                 if use_src_record:
                     x0_pos_src = _x0_map_src[csd_pos_mode]  # [B, seq_len, C]
                     x0_neg_src = _x0_map_src[csd_neg_mode]  # [B, seq_len, C]

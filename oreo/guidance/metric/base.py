@@ -1,4 +1,4 @@
-"""Metric 基类定义。"""
+"""Metric Base class definition."""
 from abc import ABC, abstractmethod
 from typing import Optional, Any
 
@@ -7,25 +7,25 @@ import torch
 
 class BaseMetric(ABC):
     """
-    相似度 Metric 基类。
-    
-    所有 metric 必须实现 compute 方法，返回标量 loss。
+    Similarity Metric Base class.
+
+    all metric Must be achieved compute Method, returns a scalar loss.
     """
-    
-    name: str = "base"  # 子类必须覆盖
-    
+
+    name: str = "base"  # Subclasses must override
+
     def __init__(self, weight: float, device: torch.device, **kwargs):
         """
-        初始化 Metric。
-        
+        initialization Metric.
+
         Args:
-            weight: loss 权重（仅用于记录，实际加权在外部进行）
-            device: 计算设备
-            **kwargs: 子类特定参数
+            weight: loss Weights (for logging only, actual weighting is done externally)
+            device: computing equipment
+            **kwargs: subclass specific parameters
         """
         self.weight = weight
         self.device = device
-    
+
     @abstractmethod
     def compute(
         self,
@@ -34,20 +34,20 @@ class BaseMetric(ABC):
         **kwargs,
     ) -> Optional[torch.Tensor]:
         """
-        计算 loss（不乘权重）。
-        
+        Calculate loss(without weighting).
+
         Args:
-            rendered: 渲染图 (B,C,H,W) [0,1]，有梯度
-            target: 目标（可以是图像张量或其他格式）
-            **kwargs: 额外参数
-        
+            rendered: Rendering (B,C,H,W) [0,1], with gradient
+            target: target (can be an image tensor or other format)
+            **kwargs: extra parameters
+
         Returns:
-            标量 loss，或 None（如果不计算）
+            scalar loss, or None(if not calculated)
         """
         pass
-    
+
     def cleanup(self) -> None:
-        """释放资源（可选实现）。"""
+        """Release resources (optional implementation)."""
         pass
 
 

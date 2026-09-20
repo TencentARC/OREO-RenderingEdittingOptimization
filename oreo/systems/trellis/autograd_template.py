@@ -32,7 +32,7 @@ from oreo.generators.trellis.rollout.ode import (
 
 @contextlib.contextmanager
 def _disable_uncond(state, denoise_cfg: bool):
-    """临时置空 uncond_embed，跳过 uncond forward pass。True = 不改，False = 置空。"""
+    """temporarily vacant uncond_embed, skip uncond forward pass.True = Don't change,False = Leave blank."""
     if denoise_cfg:
         yield
         return
@@ -59,38 +59,38 @@ def _phase3_5_velocity_reg(
     reg_type: str = "v",
 ) -> None:
     """
-    Phase 3.5: teacher velocity 预测 + 正则化 backward → tracker.reg_grad。
+    Phase 3.5: teacher velocity Forecast + regularization backward → tracker.reg_grad.
 
-    支持三种正则化类型：
+    Three regularization types are supported:
       - "v":  MSE(v_proxy, v_teacher)
-      - "x0": MSE(x0_stu, x0_tea) / (t² + ε)，单步下与 v reg 数学等价
-      - "x1": MSE(x0_stu, x0_tea)，不除以 t²，小 t 时正则化更弱
+      - "x0": MSE(x0_stu, x0_tea) / (t² + ε), single step with v reg mathematical equivalent
+      - "x1": MSE(x0_stu, x0_tea), not divided by t², small t Regularization is weaker when
 
-    完成后 tracker 中写入：
-      - reg_grad:     (N, C) detached 正则化梯度
-      - reg_loss_val: float 标量值（日志用）
-      - v_proxy.grad: 被清零（留给 P4c guidance 梯度）
+    After completion tracker Write in:
+      - reg_grad:     (N, C) detached regularized gradient
+      - reg_loss_val: float Scalar value (for logging)
+      - v_proxy.grad: is cleared (left to P4c guidance gradient)
 
     Args:
-        ops: TrellisFlowEditOps 实例
+        ops: TrellisFlowEditOps Example
         state: TrellisState
-        system: 系统组件
-        tracker: VelocityTracker（已 setup_proxy）
-        zt_feats: (N, C) 加噪后的特征，detached
-        t_val: float, 归一化时间步 [0, 1]
-        reg_weight: 正则化权重（> 0）
-        reg_type: 正则化类型，"v" | "x0" | "x1"
+        system: system components
+        tracker: VelocityTracker(Already setup_proxy)
+        zt_feats: (N, C) Features after adding noise,detached
+        t_val: float, normalized time step [0, 1]
+        reg_weight: Regularization weight (> 0)
+        reg_type: regularization type,"v" | "x0" | "x1"
     """
     v_teacher = ops.predict_velocity_teacher(
         state, system, zt_feats, t_val,
     )  # (N, C), detached
 
     if reg_type == "x0":
-        x0_stu = zt_feats - t_val * tracker.v_proxy  # (N, C), 依赖 v_proxy
+        x0_stu = zt_feats - t_val * tracker.v_proxy  # (N, C), Depend on v_proxy
         x0_tea = zt_feats - t_val * v_teacher         # (N, C), detached
         raw_reg = _compute_x0_regularization(x0_stu, x0_tea, t_val)  # scalar
     elif reg_type == "x1":
-        x0_stu = zt_feats - t_val * tracker.v_proxy  # (N, C), 依赖 v_proxy
+        x0_stu = zt_feats - t_val * tracker.v_proxy  # (N, C), Depend on v_proxy
         x0_tea = zt_feats - t_val * v_teacher         # (N, C), detached
         raw_reg = _compute_x1_regularization(x0_stu, x0_tea)  # scalar
     elif reg_type == "v":
@@ -104,14 +104,14 @@ def _phase3_5_velocity_reg(
     reg_loss.backward()  # → v_proxy.grad = reg_grad
     tracker.reg_grad = tracker.v_proxy.grad.detach().clone()  # (N, C)
     tracker.reg_loss_val = reg_loss.item()
-    tracker.v_proxy.grad = None  # ★ 清零，给 P4c 的 guidance 梯度腾位
+    tracker.v_proxy.grad = None  # ★ Clear, give P4c of guidance gradient vacancy
 
     del v_teacher, reg_loss
     torch.cuda.empty_cache()
 
 
 # =====================================================================
-# Sparse Contrastive FlowEdit 训练步：Latent 空间对比学习
+# Sparse Contrastive FlowEdit Training steps:Latent spatial contrastive learning
 # =====================================================================
 
 def trellis_sparse_contrastive_step(
@@ -123,15 +123,15 @@ def trellis_sparse_contrastive_step(
     prefix: str = "",
 ) -> Dict[str, Any]:
     """
-    Contrastive FlowEdit 训练步 — Latent 空间对比学习。
+    Contrastive FlowEdit training steps — Latent Spatial contrastive learning.
 
-    编排：
+    Arrangement:
       P0   Dense Sampling
       P1   Pretrained Rollout (teacher, no_grad) → clean z₀
       P2   Sample t, add noise → zₜ
       P3   Student velocity prediction → v_student
            VelocityTracker proxy: z0_hat_norm = zₜ - t·v_proxy
-      P3.5 (可选) Teacher velocity reg → reg_grad
+      P3.5 (Optional) Teacher velocity reg → reg_grad
       P4a  Decode/render Teacher z₀ → src images (PIL)
       P4b  FlowEdit edit src → tgt images (PIL)
       P4c  DINOv2 encode src / tgt → c_src, c_tgt
@@ -141,20 +141,20 @@ def trellis_sparse_contrastive_step(
            loss.backward() → v_proxy.grad
       P5d  relay: v_student.backward(v_proxy.grad + reg_grad) → θ.grad
 
-    梯度传播路径：
+    Gradient propagation path:
       loss → z0_hat_norm → v_proxy → (relay) → v_student → θ.grad
-      不需要 decode/render 的计算图（对比 loss 在归一化 latent 空间）。
+      No need decode/render Computational graph of (compared to loss in normalization latent space).
 
     Args:
-        ops: TrellisContrastiveOps 实例
-        state: TrellisContrastiveState（已 attach_batch）
+        ops: TrellisContrastiveOps Example
+        state: TrellisContrastiveState(Already attach_batch)
         system: TrellisSystem
-        global_step: 全局步数
+        global_step: global steps
         profiler: PhaseProfiler
-        prefix: 日志/profiler 前缀
+        prefix: Log/profiler prefix
 
     Returns:
-        日志字典
+        log dictionary
     """
     seed = int(system.cfg.seed)
     cfg = system.cfg
@@ -167,9 +167,9 @@ def trellis_sparse_contrastive_step(
     # ── P1: Rollout → clean z₀ ──
     profiler.tick(f"{prefix}P1_rollout")
     ops.rollout(state, system, seed)
-    state.stage2.z0_teacher = state.stage2.z0  # 保存 teacher slat 引用
+    state.stage2.z0_teacher = state.stage2.z0  # save teacher slat Quote
 
-    # ── P2: 加噪 z₀ → zₜ ──
+    # ── P2: Noise z₀ → zₜ ──
     profiler.tick(f"{prefix}P2_add_noise")
     z0_norm = ops.normalize_latent(state, system)  # (N, C)
     t_val = ops.sample_timestep(system)
@@ -177,21 +177,21 @@ def trellis_sparse_contrastive_step(
 
     # ── P3: Student velocity + proxy ──
     profiler.tick(f"{prefix}P3_velocity")
-    student_denoise_cfg = cfg.train.student_denoise_cfg  # True = 用 CFG, False = 跳过 uncond forward
+    student_denoise_cfg = cfg.train.student_denoise_cfg  # True = use CFG, False = skip uncond forward
     with _disable_uncond(state, student_denoise_cfg):
         v_student = ops.predict_velocity_student(state, system, zt_feats, t_val)
 
     tracker = VelocityTracker()
     tracker.setup_proxy(v_student)
 
-    # ẑ₀_stu = zₜ - t·v_proxy（梯度通过 v_proxy leaf）
+    # ẑ₀_stu = zₜ - t·v_proxy(Gradient via v_proxy leaf)
     z0_hat_norm = zt_feats - t_val * tracker.v_proxy  # (N, C)
-    # ★ z0_hat_norm 保留为局部变量，不更新 slat（不需要 decode student）
+    # ★ z0_hat_norm Retained as a local variable and not updated slat(No need decode student)
 
     state.stage2.z0._spatial_cache.clear()
     torch.cuda.empty_cache()
 
-    # ── P3.5: Velocity reg（可选）──
+    # ── P3.5: Velocity reg(optional)──
     reg_weight = float(cfg.train.loss.reg)
     reg_type = str(cfg.train.loss.reg_type)
     if reg_weight > 0:
@@ -212,11 +212,11 @@ def trellis_sparse_contrastive_step(
     profiler.tick(f"{prefix}P4b_edit_views")
     ops.edit_views(state, system)
 
-    # ── P4c: DINOv2 encode → c_src, c_tgt (挂载到 state) ──
+    # ── P4c: DINOv2 encode → c_src, c_tgt (mount to state) ──
     profiler.tick(f"{prefix}P4c_encode")
     ops.encode_conditions(state, system)
 
-    # ── P4c.5: DINO similarity 监控 + 可选 adaptive swap ──
+    # ── P4c.5: DINO similarity Monitor + Optional adaptive swap ──
     dino_sim, sim_src, sim_tgt = ops.compute_dino_similarity(state)
     contrastive_cfg = cfg.train.loss.contrastive
     if bool(contrastive_cfg.adaptive_swap):
@@ -225,7 +225,7 @@ def trellis_sparse_contrastive_step(
 
     # ── P5a: Re-noise ẑ₀_stu → zₜ_stu; Teacher denoise with c_tgt → positive ──
     profiler.tick(f"{prefix}P5a_teacher_tgt")
-    zt_stu = ops.add_noise(z0_hat_norm.detach(), t_val)  # (N, C), 从 student 预测重新加噪
+    zt_stu = ops.add_noise(z0_hat_norm.detach(), t_val)  # (N, C), from student Predictive re-noising
     z0_tea_tgt = ops.predict_x0_teacher_with_cond(
         state, system, zt_stu, t_val, cond_source="edited",
     )  # (N, C), detached
@@ -259,7 +259,7 @@ def trellis_sparse_contrastive_step(
 
     profiler.tick(f"{prefix}end")
 
-    # ── 构建日志 ──
+    # ── Build log ──
     log: Dict[str, Any] = {}
     log[f"{prefix}loss/contrastive"] = loss.item()
     log[f"{prefix}loss/contrastive_weighted"] = loss_weighted.item()
@@ -277,7 +277,7 @@ def trellis_sparse_contrastive_step(
 
 
 # =====================================================================
-# Dense Contrastive Step — 供 Dual-Stage 入口独立调用
+# Dense Contrastive Step — supply Dual-Stage Entrance independent call
 # =====================================================================
 
 def trellis_dense_contrastive_step(
@@ -289,10 +289,10 @@ def trellis_dense_contrastive_step(
     prefix: str = "",
 ) -> Dict[str, Any]:
     """
-    Dense 阶段对比学习步（D1–D3c）。
+    Dense Stage comparison learning steps (D1–D3c).
 
-    复用 Sparse 阶段产生的 state.stage1.z0 + c_src / c_tgt。
-    要求在调用前 Sparse 阶段已完成（state 上有必要数据）。
+    Reuse Sparse produced in stages state.stage1.z0 + c_src / c_tgt.
+    Required before calling Sparse stage completed (state necessary data).
     """
     log: Dict[str, Any] = {}
 
@@ -301,7 +301,7 @@ def trellis_dense_contrastive_step(
 
     state.stage1.z0_teacher = state.stage1.z0
 
-    # ── D1: 加噪 z_s → zₜ ──
+    # ── D1: Noise z_s → zₜ ──
     profiler.tick(f"{dp}D1_add_noise")
     z0_dense = dense_ops.normalize_latent(state, system)  # (B, C, R, R, R)
     t_val = dense_ops.sample_timestep(system)
@@ -309,7 +309,7 @@ def trellis_dense_contrastive_step(
 
     # ── D2: Student velocity + proxy ──
     profiler.tick(f"{dp}D2_velocity")
-    student_denoise_cfg = cfg.train.student_denoise_cfg  # True = 用 CFG, False = 跳过 uncond forward
+    student_denoise_cfg = cfg.train.student_denoise_cfg  # True = use CFG, False = skip uncond forward
     with _disable_uncond(state, student_denoise_cfg):
         v_student_dense = dense_ops.predict_velocity_student(state, system, zt_dense, t_val)
 
@@ -320,7 +320,7 @@ def trellis_dense_contrastive_step(
 
     torch.cuda.empty_cache()
 
-    # ── D2.5: Velocity reg（可选）──
+    # ── D2.5: Velocity reg(optional)──
     reg_weight = float(cfg.train.loss.reg)
     reg_type = str(cfg.train.loss.reg_type)
     if reg_weight > 0:
@@ -369,7 +369,7 @@ def trellis_dense_contrastive_step(
 
     profiler.tick(f"{dp}end")
 
-    # ── Dense 日志 ──
+    # ── Dense Log ──
     log[f"{dp}loss/contrastive"] = loss_dense.item()
     log[f"{dp}loss/contrastive_weighted"] = loss_dense_weighted.item()
     log.update({

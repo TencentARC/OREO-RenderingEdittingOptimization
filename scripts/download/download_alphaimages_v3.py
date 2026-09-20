@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-使用 snapshot 下载 ZhiyuanthePony/AlphaImages_v3 数据集。
+Use snapshot Download ZhiyuanthePony/AlphaImages_v3 data set.
 
-示例：
+Example:
     python scripts/download/download_alphaimages_v3.py \
             --out dataset/alphaimages_v3
 """
@@ -28,7 +28,7 @@ def main() -> None:
     )
     snap = Path(snap_path)
 
-    # 直接镜像 train/test 下的 png 文件到输出目录
+    # Direct mirroring train/test down png file to output directory
     copied = 0
     skipped = 0
     for src in sorted(snap.rglob("*.png")):

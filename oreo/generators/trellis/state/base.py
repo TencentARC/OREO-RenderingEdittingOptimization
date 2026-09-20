@@ -1,14 +1,14 @@
 """
-TrellisState - Trellis 生成过程的状态容器
+TrellisState - Trellis The state container for the build process
 
-存储整个生成流程中的所有中间状态，支持:
-- 稀疏结构坐标 (coords)
-- 多阶段 latent (stage1 / stage2)
-- 相机参数 (cameras)
-- 条件信息 (views_conditioned)
-- 生成结果 (views_generated)
-- 编辑结果 (views_edited)
-- 指导信号 (guidance)
+Stores all intermediate states in the entire generation process, supporting:
+- sparse structure coordinates (coords)
+- multi-stage latent (stage1 / stage2)
+- Camera parameters (cameras)
+- condition information (views_conditioned)
+- Generate results (views_generated)
+- Edit results (views_edited)
+- guidance signal (guidance)
 """
 
 from dataclasses import dataclass, field
@@ -22,165 +22,165 @@ from .stage_latent import StageLatent
 @dataclass
 class TrellisState(BaseState):
     """
-    Trellis 生成过程的状态容器。
-    
-    存储整个生成流程中的所有中间状态，包括：
-    - 稀疏结构坐标 (coords)
-    - 多阶段 latent (stage1 / stage2)
-    - 相机参数 (cameras)
-    - 条件信息 (views_conditioned)
-    - 生成结果 (views_generated)
-    - 编辑结果 (views_edited)
-    - 指导信号 (guidance)
-    
-    属性说明:
-        coords (torch.Tensor): 稀疏结构坐标，形状 (N, 4)。
-                               N 为总点数 (batch_size * num_points)。
-                               第 0 列为 batch 索引，后 3 列为 (x, y, z) 坐标。
-        
-        stage1 (StageLatent): Stage 1 (structure) latent 容器。
-        stage2 (StageLatent): Stage 2 (SLAT) latent 容器。
-            - z0 (SparseTensor): rollout 产出的反归一化 latent，形状 (N, C)。
-            - reg_loss: rollout 产出的 v-reg loss。
-        
-        cameras (BaseState.Cameras): 相机参数容器。
-            - c2w (torch.Tensor): (B, V, 4, 4) 相机到世界变换矩阵。
-            - w2c (torch.Tensor): (B, V, 4, 4) 世界到相机变换矩阵。
-            - intrinsics (torch.Tensor): (B, V, 3, 3) 内参矩阵。
-            
-        views_conditioned (BaseState.ViewsConditioned): 条件信息容器。
-            - image_pils (List[PIL.Image]): 输入的条件图像列表。
-            - cond_embed (torch.Tensor): (B, S, C) 条件嵌入 (CLIP/DINOv2)。
-            - uncond_embed (torch.Tensor): (B, S, C) 无条件嵌入 (用于 CFG)。
-            
-        views_generated (TrellisState.ViewsGenerated): 生成结果容器。
-            - image_tensor (torch.Tensor): (B, V, H, W, C) GS Color 渲染结果
-            - normal_tensor (torch.Tensor): (B, V, H, W, C) Mesh Normal 渲染（Hybrid 用）
-            
-        views_edited (TrellisState.ViewsEdited): 编辑结果容器（覆盖基类）。
+    Trellis The state container for the build process.
+
+    Stores all intermediate states in the entire generation process, including:
+    - sparse structure coordinates (coords)
+    - multi-stage latent (stage1 / stage2)
+    - Camera parameters (cameras)
+    - condition information (views_conditioned)
+    - Generate results (views_generated)
+    - Edit results (views_edited)
+    - guidance signal (guidance)
+
+    Property description:
+        coords (torch.Tensor): Sparse structure coordinates, shapes (N, 4).
+                               N for total points (batch_size * num_points).
+                               No. 0 listed as batch index, after 3 listed as (x, y, z) coordinates.
+
+        stage1 (StageLatent): Stage 1 (structure) latent container.
+        stage2 (StageLatent): Stage 2 (SLAT) latent container.
+            - z0 (SparseTensor): rollout denormalization of output latent, shape (N, C).
+            - reg_loss: rollout Output v-reg loss.
+
+        cameras (BaseState.Cameras): Camera parameter container.
+            - c2w (torch.Tensor): (B, V, 4, 4) Camera to world transformation matrix.
+            - w2c (torch.Tensor): (B, V, 4, 4) World to camera transformation matrix.
+            - intrinsics (torch.Tensor): (B, V, 3, 3) Internal parameter matrix.
+
+        views_conditioned (BaseState.ViewsConditioned): Condition information container.
+            - image_pils (List[PIL.Image]): Input conditional image list.
+            - cond_embed (torch.Tensor): (B, S, C) conditional embedding (CLIP/DINOv2).
+            - uncond_embed (torch.Tensor): (B, S, C) Unconditional embedding (used for CFG).
+
+        views_generated (TrellisState.ViewsGenerated): Generate a result container.
+            - image_tensor (torch.Tensor): (B, V, H, W, C) GS Color Rendering results
+            - normal_tensor (torch.Tensor): (B, V, H, W, C) Mesh Normal render(Hybrid use)
+
+        views_edited (TrellisState.ViewsEdited): Edit the result container (overrides the base class).
             - color_tensor (torch.Tensor): (B, V, C, H, W) GS Color edit
-            - color_trackers: FlowEdit trackers（GS Color 路）
-            - normal_tensor (torch.Tensor): (B, V, C, H, W) Mesh Normal edit（Hybrid 用）
-            - normal_trackers: FlowEdit trackers（Mesh Normal 路，Hybrid 用）
-            
-        guidance (TrellisState.Guidance): Guidance 结果容器。
-            - loss: 主 loss（可直接 backward）
-            - loss_dict: 细分 loss 字典（用于日志）
+            - color_trackers: FlowEdit trackers(GS Color road)
+            - normal_tensor (torch.Tensor): (B, V, C, H, W) Mesh Normal edit(Hybrid use)
+            - normal_trackers: FlowEdit trackers(Mesh Normal road,Hybrid use)
+
+        guidance (TrellisState.Guidance): Guidance Result container.
+            - loss: Lord loss(can be directly backward)
+            - loss_dict: Segmentation loss Dictionary (for logging)
     """
-    
+
     @dataclass
     class Guidance:
-        """Guidance 结果容器。"""
-        loss: Any = None                  # 主 loss（可直接 backward）
-        loss_dict: Any = None             # 细分 loss 字典（用于日志）
-    
+        """Guidance Result container."""
+        loss: Any = None                  # Lord loss(can be directly backward)
+        loss_dict: Any = None             # Segmentation loss Dictionary (for logging)
+
     @dataclass
     class ViewsEdited:
-        """编辑结果容器（覆盖基类，支持 Hybrid 双路渲染）。
+        """Edit results container (overrides base class, supports Hybrid Dual-pass rendering).
 
         - color_tensor / color_trackers: GS Color edit + trackers
-        - normal_tensor / normal_trackers: Mesh Normal edit + trackers（Hybrid 用）
+        - normal_tensor / normal_trackers: Mesh Normal edit + trackers(Hybrid use)
 
-        单路模式下只使用 color_tensor / color_trackers。
-        attach_guidance_result 默认写入 color_* 字段。
+        Only used in single channel mode color_tensor / color_trackers.
+        attach_guidance_result Default write color_* field.
         """
         color_tensor: Any = None         # (B, V, C, H, W) GS Color edit
         color_trackers: Any = None       # List[StateTracker]
-        normal_tensor: Any = None        # (B, V, C, H, W) Mesh Normal edit（Hybrid 用）
-        normal_trackers: Any = None      # List[StateTracker]（Hybrid 用）
+        normal_tensor: Any = None        # (B, V, C, H, W) Mesh Normal edit(Hybrid use)
+        normal_trackers: Any = None      # List[StateTracker](Hybrid use)
 
     @dataclass
     class ViewsGenerated:
-        """生成视角缓存（覆盖基类，支持 Hybrid 双路渲染）。
+        """Generate perspective cache (overrides base class, supports Hybrid Dual-pass rendering).
 
-        - image_tensor: 单路 GS Color 渲染结果，或 Hybrid 模式下的 GS Color。
-        - normal_tensor: Hybrid 模式下的 Mesh Normal 渲染结果。
+        - image_tensor: single path GS Color render the result, or Hybrid mode GS Color.
+        - normal_tensor: Hybrid mode Mesh Normal Rendering results.
         """
-        image_tensor: Any = None   # (B, V, H, W, C) GS Color 渲染结果
-        normal_tensor: Any = None  # (B, V, H, W, C) Mesh Normal 渲染结果（Hybrid 用）
-    
-    # batch key -> state 属性的映射（类常量）
+        image_tensor: Any = None   # (B, V, H, W, C) GS Color Rendering results
+        normal_tensor: Any = None  # (B, V, H, W, C) Mesh Normal Rendering result (Hybrid use)
+
+    # batch key -> state Mapping of attributes (class constants)
     _CAMERA_KEYS: ClassVar[List[str]] = ["c2w", "w2c", "mvp", "positions", "intrinsics", "light_positions"]
     _VIEWS_COND_KEYS: ClassVar[List[str]] = ["image_pils", "paths"]
-    
-    # ============== Trellis 专用子状态容器 ==============
+
+    # ============== Trellis Dedicated substate container ==============
     stage1: StageLatent = field(default_factory=StageLatent)
     stage2: StageLatent = field(default_factory=StageLatent)
     guidance: Guidance = field(default_factory=Guidance)
-    views_generated: ViewsGenerated = field(default_factory=ViewsGenerated)  # 覆盖 BaseState
-    views_edited: ViewsEdited = field(default_factory=ViewsEdited)           # 覆盖 BaseState
+    views_generated: ViewsGenerated = field(default_factory=ViewsGenerated)  # Cover BaseState
+    views_edited: ViewsEdited = field(default_factory=ViewsEdited)           # Cover BaseState
 
     def attach_batch(self, batch: Dict[str, Any], pipeline: Any = None) -> "TrellisState":
         """
-        从数据批次中提取并挂载所有数据到 state。
-        
+        Extract and mount all data from data batch to state.
+
         Args:
-            batch: DataLoader 返回的批次数据，包含图像、相机参数等。
-            pipeline: 必须提供，用于调用 prepare_image_conditions 从 image_pils 生成条件嵌入。
-        
+            batch: DataLoader The returned batch data includes images, camera parameters, etc.
+            pipeline: Required for calling prepare_image_conditions from image_pils Generate conditional embeddings.
+
         Returns:
-            self: 支持链式调用
+            self: Support chain calls
         """
-        # ---- 1. views_conditioned（图像、路径、嵌入） ----
+        # ---- 1. views_conditioned(image, path, embed) ----
         for key in self._VIEWS_COND_KEYS:
             if key in batch:
                 setattr(self.views_conditioned, key, batch[key])
-        
-        # 从 image_pils 生成条件编码
+
+        # from image_pils Generate conditional encoding
         if "image_pils" in batch and pipeline is not None:
-            # pipeline.prepare_image_conditions 负责预处理图像（如去背、缩放）并计算 Embedding
+            # pipeline.prepare_image_conditions Responsible for preprocessing images (such as back removal, scaling) and calculating Embedding
             cond = pipeline.prepare_image_conditions(batch["image_pils"])
             self.views_conditioned.cond_embed = cond["cond"]
-            # 如果没有 neg_cond，使用全零张量作为无条件嵌入
+            # if not neg_cond, using all-zero tensors as unconditional embeddings
             self.views_conditioned.uncond_embed = cond.get("neg_cond", torch.zeros_like(cond["cond"]))
-        
-        # ---- 2. 指导信号 (Guidance 数据) ----
+
+        # ---- 2. guidance signal (Guidance data) ----
         if "Guidances" in batch:
             self.guidances_data = batch["Guidances"]
-        
-        # ---- 3. 相机参数 ----
+
+        # ---- 3. Camera parameters ----
         for key in self._CAMERA_KEYS:
             if key in batch:
                 setattr(self.cameras, key, batch[key])
-        
+
         return self
 
     def attach_guidance_result(self, guidance_result: Any) -> "TrellisState":
         """
-        将 GuidanceResult 挂载到 state。
+        will GuidanceResult mount to state.
 
-        默认写入 color_tensor / color_trackers（GS Color 路）。
-        Hybrid 模式下，mesh pass 的 edit 由调用方搬运到 normal_tensor / normal_trackers。
+        Default write color_tensor / color_trackers(GS Color road).
+        Hybrid mode,mesh pass of edit Moved by the caller to normal_tensor / normal_trackers.
 
         Args:
-            guidance_result: GuidanceResult 对象，包含 loss 和可选的 edited_imgs。
-        
+            guidance_result: GuidanceResult object, including loss and optional edited_imgs.
+
         Returns:
-            self: 支持链式调用
+            self: Support chain calls
         """
-        # Loss 挂载到 guidance
+        # Loss mount to guidance
         self.guidance.loss = guidance_result.loss
         self.guidance.loss_dict = guidance_result.loss_dict
-        # 编辑后图像和 trackers 写入 color_* 缓冲区（默认）
+        # Edited image and trackers write color_* buffer (default)
         self.views_edited.color_tensor = guidance_result.edited_imgs
         self.views_edited.color_trackers = guidance_result.trackers
         return self
 
     def prepare_for_vjp(self) -> "TrellisState":
         """
-        Phase 2→3 过渡清理：释放 decode/render 中间产物，降低 VJP 阶段显存水位。
+        Phase 2→3 Transition Cleanup: Release decode/render intermediate product, reduced VJP Stage memory water level.
 
-        VJP 只需要：
-        - stage2.z0.coords（通过 .replace() 构建 x_t）
-        - views_conditioned（条件编码）
-        其余 decode 产物、spatial_cache 均可释放。
+        VJP Just need:
+        - stage2.z0.coords(via .replace() build x_t)
+        - views_conditioned(Conditional encoding)
+        The rest decode products,spatial_cache All can be released.
 
         Returns:
-            self: 支持链式调用
+            self: Support chain calls
         """
-        # SparseTensor._spatial_cache 存储 neighbor maps / window partition indices 等
-        # 使用 .clear() 做 in-place 清空：replace() 会共享同一个 dict 引用，
-        # in-place 才能让所有共享方都释放缓存
+        # SparseTensor._spatial_cache storage neighbor maps / window partition indices Wait
+        # Use .clear() do in-place Clear:replace() will share the same dict quote,
+        # in-place In order to allow all sharing parties to release the cache
         if self.stage2.z0 is not None:
             self.stage2.z0._spatial_cache.clear()
         torch.cuda.empty_cache()

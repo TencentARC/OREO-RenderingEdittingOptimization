@@ -1,23 +1,23 @@
 """
-Profile-based 自适应 chunk 调度器。
+Profile-based Adaptive chunk scheduler.
 
-核心类：
-- ProfiledScheduler: 生成器，自动 profiling 显存消耗并动态计算 chunk_size
+Core classes:
+- ProfiledScheduler: generator, automatic profiling Video memory consumption and dynamic calculation chunk_size
 
-原理：
-1. 第一次 yield 返回 probe chunk（小），调用方处理后控制权返回
-2. 测量 probe 期间的峰值显存增量 → 计算 bytes_per_item
-3. 根据剩余显存和 bytes_per_item 计算最优 chunk_size
-4. 后续 yield 使用最优 chunk_size
+Principle:
+1. first time yield Return probe chunk(Small), the caller returns control after processing
+2. Measure probe Peak memory increment during → Calculate bytes_per_item
+3. According to the remaining video memory and bytes_per_item Calculate optimal chunk_size
+4. Follow-up yield Use the best chunk_size
 
-用法：
-    # cat 合并（normal 分块）
+Usage:
+    # cat merge(normal Chunked)
     results = []
     for start, size in ProfiledScheduler(K, device, probe_size=2000):
         results.append(compute(data[start:start+size]))
     output = torch.cat(results, dim=0)
 
-    # z-buffer 合并（rast 分块）
+    # z-buffer merge(rast Chunked)
     for start, size in ProfiledScheduler(num_faces, device, probe_size=50000):
         rast = rasterize(faces[start:start+size])
         zbuffer_merge(...)
@@ -29,47 +29,47 @@ import torch
 
 class ProfiledScheduler:
     """
-    Profile-based 自适应 chunk 调度器（生成器）。
+    Profile-based Adaptive chunk Scheduler (generator).
 
-    利用 Python generator 的 yield 暂停/恢复机制：
-    - 第一次 yield 后，调用方处理 probe chunk
-    - 控制权返回时测量显存，计算最优 chunk_size
-    - 后续 yield 使用最优 chunk_size
+    take advantage of Python generator of yield pause/Recovery mechanism:
+    - first time yield After that, the caller handles probe chunk
+    - Measure the video memory when control returns and calculate the optimal chunk_size
+    - Follow-up yield Use the best chunk_size
 
-    chunk_size 计算公式::
+    chunk_size Calculation formula::
 
         bytes_per_item = probe_delta / probe_size × safety_factor
-        available      = (GPU总显存 - 当前占用) × target_usage
+        available      = (GPUtotal video memory - Currently occupied) × target_usage
         chunk_size     = clamp(available / bytes_per_item, min_chunk, max_chunk)
 
-    三道防线：
-    1. safety_factor — 单位估算层面的保守（高估 bytes_per_item → 低估 chunk_size）
-    2. target_usage  — 全局显存层面的保守（预留给 allocator 碎片 / 其他进程）
-    3. min/max_chunk — 硬性钳位兜底
+    Three lines of defense:
+    1. safety_factor — Conservatism (overestimation) at the unit estimate level bytes_per_item → underestimate chunk_size)
+    2. target_usage  — Global memory level conservation (reserved for allocator fragments / other processes)
+    3. min/max_chunk — Hard clamp pocket bottom
 
     Args:
-        total: 总 item 数量。
-        device: CUDA 设备。
-        probe_size: 探针大小（第一个 chunk 的大小）。
-            - 太小 → 显存 delta 被 CUDA allocator 对齐/碎片噪声淹没，估算不准。
-            - 太大 → 显存紧张时 probe 本身 OOM。
-            - 经验：取预期 chunk_size 的 1/10 ~ 1/50。
-            - 重计算场景（如 26-neighbor normal）用小值（~2000）；
-              GPU 并行场景（如 nvdiffrast rasterize）用大值（~50000）以获得稳定信号。
-        safety_factor: 安全系数，乘在 bytes_per_item 上。
-            - 1.3（30% 余量）：适用于开销均匀的场景（如 voxel normal 计算）。
-            - 1.5（50% 余量）：适用于波动较大的场景（如 nvdiffrast 内部 buffer 预分配、
-              面片密度不均）。
-        target_usage: 目标显存利用率（0~1），默认 0.85。
-            - 保留 15% 给 PyTorch allocator 内部碎片和其他进程。
-            - 与 safety_factor 形成双重保险。
-        min_chunk: 最小 chunk 大小。
-            - 防止显存紧张时 chunk_size 过小导致循环次数爆炸、Python 循环 overhead 主导。
-            - 重计算场景 ~500；GPU 并行场景 ~10000。
-        max_chunk: 最大 chunk 大小。
-            - 防止 probe 低估 bytes_per_item 导致下一个 chunk OOM。
-            - nvdiffrast 硬限制：单次 rasterize ≤ 2^24（~1677万）面片，
-              rast 场景建议 max_chunk ≤ 2000000。
+        total: total item Quantity.
+        device: CUDA equipment.
+        probe_size: probe size (first chunk size).
+            - too small → Video memory delta Be CUDA allocator Alignment/Submerged in debris noise, estimation is inaccurate.
+            - too big → When memory is tight probe itself OOM.
+            - Experience: Take expectations chunk_size of 1/10 ~ 1/50.
+            - Recalculation scenarios (such as 26-neighbor normal) use small values (~2000);
+              GPU Parallel scenarios (such as nvdiffrast rasterize) with a large value (~50000) to obtain a stable signal.
+        safety_factor: safety factor, multiplied by bytes_per_item On.
+            - 1.3(30% margin): suitable for scenarios with even overhead (such as voxel normal calculation).
+            - 1.5(50% margin): suitable for scenarios with large fluctuations (such as nvdiffrast internal buffer pre-allocated,
+              The density of the dough is uneven).
+        target_usage: Target video memory utilization (0~1), default 0.85.
+            - Reserve 15% give PyTorch allocator Internal fragmentation and other processes.
+            - with safety_factor Form double insurance.
+        min_chunk: smallest chunk size.
+            - To prevent memory shortage chunk_size Too small will cause the number of cycles to explode,Python loop overhead Dominate.
+            - Recalculation scenario ~500;GPU Parallel scenario ~10000.
+        max_chunk: maximum chunk size.
+            - prevent probe underestimate bytes_per_item lead to next chunk OOM.
+            - nvdiffrast Hard limit: single rasterize ≤ 2^24(~1677Thousands) noodles,
+              rast Scenario suggestions max_chunk ≤ 2000000.
     """
 
     def __init__(
@@ -89,7 +89,7 @@ class ProfiledScheduler:
         self.target_usage = target_usage
         self.min_chunk = min_chunk
         self.max_chunk = max_chunk
-        # profiling 结果（外部可读）
+        # profiling Result (externally readable)
         self.bytes_per_item: float = 0.0
         self.chunk_size: int = 0
 
@@ -98,7 +98,7 @@ class ProfiledScheduler:
         total = self.total
         probe_n = self.probe_size
 
-        # 总量 ≤ probe_size，一次搞定
+        # total amount ≤ probe_size, done in one go
         if total <= probe_n:
             yield (0, total)
             return
@@ -107,14 +107,14 @@ class ProfiledScheduler:
         torch.cuda.reset_peak_memory_stats(dev_idx)
         mem_before = torch.cuda.max_memory_allocated(dev_idx)
 
-        yield (0, probe_n)  # 暂停，调用方处理 probe chunk
+        yield (0, probe_n)  # Pause, caller handles probe chunk
 
-        # 恢复：probe 已处理完，测量显存
+        # Recovery:probe Processed, measure memory
         mem_after = torch.cuda.max_memory_allocated(dev_idx)
         delta = max(mem_after - mem_before, 1)
         self.bytes_per_item = delta / probe_n * self.safety_factor
 
-        # 计算最优 chunk_size
+        # Calculate optimal chunk_size
         total_mem = torch.cuda.get_device_properties(dev_idx).total_memory
         allocated_now = torch.cuda.memory_allocated(dev_idx)
         available = int((total_mem - allocated_now) * self.target_usage)
@@ -128,7 +128,7 @@ class ProfiledScheduler:
             f"chunk_size={self.chunk_size}, total={total}"
         )
 
-        # ---- Phase 2: 最优分块 ----
+        # ---- Phase 2: optimal chunking ----
         offset = probe_n
         while offset < total:
             size = min(self.chunk_size, total - offset)

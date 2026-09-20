@@ -1,6 +1,6 @@
-"""训练策略：基类 + spconv 推理兼容 mixin。
+"""Training Strategy: Base Class + spconv Reasoning compatible mixin.
 
-具体策略（TrellisLoRAStrategy 等）定义在各 generator 的 training_adpter 中。
+Specific strategies (TrellisLoRAStrategy etc.) are defined in each generator of training_adpter in.
 """
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ import torch.nn as nn
 
 
 # =====================================================================
-# 基类
+# base class
 # =====================================================================
 
 class TrainingStrategy(ABC):
-    """训练策略基类。"""
+    """Training strategy base class."""
 
     def __init__(self, pipeline: Any, train_device: torch.device, teacher_device: torch.device):
         self.pipeline = pipeline
@@ -37,9 +37,9 @@ class TrainingStrategy(ABC):
 
     @contextmanager
     def dense_teacher_context(self) -> Generator[None, None, None]:
-        """临时替换 pipeline 中的 dense 模型为冻结教师。
+        """temporary replacement pipeline in dense The model is a frozen teacher.
 
-        默认 no-op（子类覆写以提供 dense teacher swap）。
+        Default no-op(Subclasses override to provide dense teacher swap).
         """
         yield
 
@@ -51,13 +51,13 @@ class TrainingStrategy(ABC):
     def has_teacher(self) -> bool:
         return True
 
-    # ---- DDP 注册 ----
+    # ---- DDP Register ----
 
     def prepare_sparse(self, accelerator, optimizer_sparse=None):
-        """用 accelerator.prepare 包装 Sparse 模型(+优化器)，回写到 pipeline。返回 prepared optimizer。
-        
-        当 optimizer_sparse 为 None 时（eval_only 模式），仅 prepare 模型，
-        确保 accelerator.load_state() 能正确恢复 checkpoint 权重。
+        """use accelerator.prepare packaging Sparse model(+optimizer), write back to pipeline. Return prepared optimizer.
+
+        When optimizer_sparse for None time (eval_only mode), only prepare model,
+        ensure accelerator.load_state() can be restored correctly checkpoint weight.
         """
         self._accelerator = accelerator
         if optimizer_sparse is not None:
@@ -68,9 +68,9 @@ class TrainingStrategy(ABC):
         return optimizer_sparse
 
     def prepare_dense(self, accelerator, optimizer_dense=None):
-        """用 accelerator.prepare 包装 Dense 模型(+优化器)，回写到 pipeline。
+        """use accelerator.prepare packaging Dense model(+optimizer), write back to pipeline.
 
-        仅 Dual-Stage 入口调用。Sparse-only 入口无需调用。
+        only Dual-Stage Entry call.Sparse-only No need to call the entrance.
         """
         self._dense_student = self.pipeline.pipe.models["sparse_structure_flow_model"]
         if optimizer_dense is not None:
@@ -84,35 +84,35 @@ class TrainingStrategy(ABC):
 
     @contextmanager
     def inference_context(self):
-        """推理上下文。基类默认 no-op，子类 / mixin 可覆写。"""
+        """Reasoning context. base class default no-op, subclass / mixin Can be overwritten."""
         yield
 
     def _unwrap(self) -> nn.Module:
-        """去除 DDP wrapper 获取原始模型。"""
+        """remove DDP wrapper Get the original model."""
         return self._accelerator.unwrap_model(self._student)
 
-    # ---- 检查点（训练恢复用） ----
+    # ---- Checkpoint (for training recovery) ----
 
     def save_student(self, ckpt_dir: Path) -> None:
-        """保存学生模型全部权重。"""
+        """Save all weights of the student model."""
         from safetensors.torch import save_file
         save_file(self._unwrap().state_dict(), str(ckpt_dir / "slat_flow_model.safetensors"))
 
     def load_student(self, ckpt_dir: Path) -> None:
-        """加载学生模型全部权重。"""
+        """Load all weights of the student model."""
         p = ckpt_dir / "slat_flow_model.safetensors"
         if p.exists():
             from safetensors.torch import load_file
             self._unwrap().load_state_dict(load_file(str(p), device="cpu"))
 
-    # ---- 推理导出 ----
+    # ---- Inference derived ----
 
     def export_student(self, ckpt_dir: Path, export_dir: Path) -> Dict[str, Path]:
         """
-        从训练 checkpoint 导出推理兼容的权重文件到 export_dir。
-        
-        默认行为：直接 copy slat_flow_model.safetensors。
-        LoRA 子类覆写此方法以实现 merge。
+        from training checkpoint Export inference-compatible weights files to export_dir.
+
+        Default behavior: direct copy slat_flow_model.safetensors.
+        LoRA Subclasses override this method to implement merge.
         """
         export_dir.mkdir(parents=True, exist_ok=True)
         src = ckpt_dir / "slat_flow_model.safetensors"
@@ -123,18 +123,18 @@ class TrainingStrategy(ABC):
 
 
 # =====================================================================
-# Mixin：spconv 推理兼容
+# Mixin:spconv Reasoning compatible
 # =====================================================================
 
 class SpconvInferenceMixin:
     """
-    Mixin: 推理时剥离 DDP 包装，使 pipeline 直接使用原始模型。
-    仿照官方 TRELLIS self.models（推理）vs self.training_models（训练）设计。
+    Mixin: stripping during inference DDP package, make pipeline Use the original model directly.
+    imitate the official TRELLIS self.models(reasoning)vs self.training_models(training) design.
     """
 
     @contextmanager
     def inference_context(self):
-        """推理时临时换回无 DDP 包装的原始模型。"""
+        """Temporarily switch to None during reasoning DDP Original mockup of packaging."""
         if self._accelerator is None:
             yield
             return

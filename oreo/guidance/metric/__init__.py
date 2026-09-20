@@ -1,18 +1,18 @@
 """
-Metric 模块。
+Metric module.
 
-提供统一的相似度计算接口，支持：
-- MSE: 像素空间均方误差
-- SSIM: 结构相似性
-- LPIPS: 感知相似性（VGG 特征）
-- DINO: DINOv3 特征相似性
-- CLIP: CLIP 图像特征相似性
+Provides a unified similarity calculation interface and supports:
+- MSE: Pixel space mean square error
+- SSIM: structural similarity
+- LPIPS: perceived similarity (VGG Features)
+- DINO: DINOv3 feature similarity
+- CLIP: CLIP Image feature similarity
 
-注：latent_csd 和 latent_mse 由 StateTracker.loss() 计算，不在此处注册。
+Note:latent_csd and latent_mse by StateTracker.loss() Compute, don't register here.
 
-使用方式：
+How to use:
     from oreo.guidance.metric import create_metrics
-    
+
     metrics = create_metrics(loss_cfg, device, extra_kwargs={...})
     for name, metric in metrics.items():
         loss = metric.compute(rendered, target)
@@ -29,8 +29,8 @@ from .dino import DINOMetric
 from .clip import CLIPMetric
 
 
-# 注册表：name -> class
-# 注：latent_csd/latent_mse 不在此注册，由 Tracker.loss() 处理
+# Registry:name -> class
+# Note:latent_csd/latent_mse Do not register here, by Tracker.loss() Process
 METRIC_REGISTRY: Dict[str, type] = {
     "mse": MSEMetric,
     "ssim": SSIMMetric,
@@ -46,16 +46,16 @@ def create_metrics(
     extra_kwargs: Dict[str, Dict] = None,
 ) -> Dict[str, BaseMetric]:
     """
-    根据 loss_cfg 中的权重创建 metrics（weight > 0 才创建）。
-    
+    According to loss_cfg weight creation in metrics(weight > 0 only created).
+
     Args:
-        loss_cfg: 配置对象，包含各 metric 的权重（如 loss_cfg.ssim, loss_cfg.lpips）
-        device: 计算设备
-        extra_kwargs: 额外参数，格式 {"metric_name": {"param": value}}
-    
+        loss_cfg: Configuration objects, including various metric weight (such as loss_cfg.ssim, loss_cfg.lpips)
+        device: computing equipment
+        extra_kwargs: Additional parameters, format {"metric_name": {"param": value}}
+
     Returns:
-        dict: {name: metric} 仅包含 weight > 0 的 metrics
-    
+        dict: {name: metric} Contains only weight > 0 of metrics
+
     Example:
         >>> metrics = create_metrics(
         ...     loss_cfg,  # ssim=0.0, lpips=1.0, dino=0.5
@@ -64,19 +64,19 @@ def create_metrics(
         ...         "dino": {"model_path": "...", "image_size": 518},
         ...     }
         ... )
-        >>> # 返回 {"lpips": LPIPSMetric(...), "dino": DINOMetric(...)}
+        >>> # Return {"lpips": LPIPSMetric(...), "dino": DINOMetric(...)}
     """
     extra_kwargs = extra_kwargs or {}
     metrics = {}
-    
+
     for name, cls in METRIC_REGISTRY.items():
-        # 获取权重：必须在 config 中显式声明
+        # Get weight: must be in config Explicit declaration in
         weight = loss_cfg[name]
-        
+
         if weight > 0:
             kwargs = extra_kwargs.get(name, {})
             metrics[name] = cls(weight=weight, device=device, **kwargs)
-    
+
     return metrics
 
 

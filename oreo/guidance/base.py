@@ -1,25 +1,25 @@
 """
-Guidance 模块基础设施。
+Guidance Module infrastructure.
 
-提供：
-- GuidanceResult: 统一的返回格式
-- BaseGuidance: 抽象基类，包含共享逻辑
-- create_guidance(): 工厂函数，创建 retained FlowEdit Guidance
+Provided by:
+- GuidanceResult: Unified return format
+- BaseGuidance: Abstract base class, containing shared logic
+- create_guidance(): Factory function, create retained FlowEdit Guidance
 
-设备分配：
-- Guidance 模型默认运行在 训练设备 + 1 的 GPU 上
-- 例如：训练在 cuda:0，则 Guidance 在 cuda:1
+Equipment allocation:
+- Guidance By default the model runs on training equipment + 1 of GPU on
+- For example: training in cuda:0, then Guidance in cuda:1
 
-统一框架（真 Loss 模式）：
-- 所有 Guidance 子类遵循相同的 compute_guidance 流程：
-    1. 格式转换
-    2. 编码到 latent（一次，有梯度）
-    3. 调用 Pipeline（无梯度）
-    4. 通过 Tracker.loss() 计算真 loss（可直接 backward）
+unified framework (true Loss mode):
+- all Guidance Subclasses follow the same compute_guidance Process:
+    1. format conversion
+    2. encode to latent(once, with gradient)
+    3. call Pipeline(no gradient)
+    4. Pass Tracker.loss() Compute true loss(can be directly backward)
 
-★ 配置分两层（Init / Runtime）：
-- Init 配置（cfg.guidance）: 模型加载参数，传给 __init__，全阶段共享
-- Runtime 配置（cfg.stage.guidance）: prompt / loss 权重等，每次 compute_guidance 传入
+★ The configuration is divided into two layers (Init / Runtime):
+- Init configure(cfg.guidance): Model loading parameters, passed to __init__, shared at all stages
+- Runtime configure(cfg.stage.guidance): prompt / loss weights etc., each time compute_guidance incoming
 """
 
 from __future__ import annotations
@@ -39,127 +39,127 @@ if TYPE_CHECKING:
 
 
 # =====================================================================
-# GuidanceResult - 统一返回格式
+# GuidanceResult - Unified return format
 # =====================================================================
 
 @dataclass
 class GuidanceResult:
     """
-    Guidance 计算结果（通用格式）。
-    
+    Guidance Calculation result (generic format).
+
     Attributes:
-        loss: 主 loss（可直接 backward）
-        edited_imgs: 编辑后的图像 (B,V,C,H,W)，FlowEdit 专用
-        loss_dict: 细分 loss 字典，用于日志记录
-        trackers: FlowEdit 中间状态跟踪器列表（用于多步监督）
+        loss: Lord loss(can be directly backward)
+        edited_imgs: edited image (B,V,C,H,W),FlowEdit dedicated
+        loss_dict: Segmentation loss Dictionary, used for logging
+        trackers: FlowEdit List of intermediate state trackers (for multi-step supervision)
     """
-    loss: Optional[torch.Tensor] = None                                 # 主 loss（edit() 模式下为 None）
-    edited_imgs: Optional[torch.Tensor] = None                          # (B,V,C,H,W) FlowEdit 专用
-    loss_dict: Optional[Dict[str, torch.Tensor]] = field(default=None)  # 细分 loss
-    trackers: Optional[List["StateTracker"]] = None             # FlowEdit 专用
+    loss: Optional[torch.Tensor] = None                                 # Lord loss(edit() mode is None)
+    edited_imgs: Optional[torch.Tensor] = None                          # (B,V,C,H,W) FlowEdit dedicated
+    loss_dict: Optional[Dict[str, torch.Tensor]] = field(default=None)  # Segmentation loss
+    trackers: Optional[List["StateTracker"]] = None             # FlowEdit dedicated
 
 
 # =====================================================================
-# BaseGuidance - 抽象基类（包含共享逻辑）
+# BaseGuidance - Abstract base class (contains shared logic)
 # =====================================================================
 
 class BaseGuidance(ABC):
     """
-    Guidance 抽象基类（真 Loss 模式）。
-    
-    ★ 配置分两层：
-    - __init__(guidance_cfg, train_device): 只加载模型，guidance_cfg 仅含 init 参数
-    - compute_guidance(..., guidance_cfg=...): 运行时参数通过 guidance_cfg 传入
-    
-    提供共享功能：
-    - 设备初始化
-    - 格式转换（tensor_to_pil, pils_to_tensor）
-    - 输入格式处理（_reshape_input）
-    - Latent 编码（encode_to_latent）
-    - 统一的 compute_guidance 模板方法
-    
-    子类需要：
-    - 设置 loss_key 类属性
-    - 初始化 self.pipe（Pipeline 实例）
-    - 实现 _run_pipeline() 调用 pipeline
-    - 实现 _compute_loss() 计算真 loss（通过 Tracker.loss()）
-    - 可选覆盖 _build_result() 自定义返回结果
+    Guidance abstract base class(true Loss mode).
+
+    ★ The configuration is divided into two levels:
+    - __init__(guidance_cfg, train_device): Only load the model,guidance_cfg Contains only init parameters
+    - compute_guidance(..., guidance_cfg=...): Runtime parameters passed guidance_cfg incoming
+
+    Provide sharing functions:
+    - Device initialization
+    - Format conversion (tensor_to_pil, pils_to_tensor)
+    - Input format processing (_reshape_input)
+    - Latent encoding(encode_to_latent)
+    - unified compute_guidance template method
+
+    Subclasses require:
+    - settings loss_key class attributes
+    - initialization self.pipe(Pipeline Example)
+    - realize _run_pipeline() call pipeline
+    - realize _compute_loss() Compute true loss(via Tracker.loss())
+    - Optional override _build_result() Customized return results
     """
-    
-    # 类属性：用于 loss_dict 的 key 名称（子类可覆盖）
+
+    # Class attributes: used for loss_dict of key Name (can be overridden by subclasses)
     loss_key: str = "guidance"
-    
-    # 实例属性（子类初始化）
+
+    # Instance properties (subclass initialization)
     device: torch.device
     train_device: torch.device
-    pipe: Any  # Pipeline 实例
+    pipe: Any  # Pipeline Example
     edit_resolution: int
-    
+
     def __init__(self, guidance_cfg: Any, train_device: torch.device):
         """
-        基类初始化（只加载模型，不绑定运行时参数）。
-        
+        Base class initialization (only loads the model, does not bind runtime parameters).
+
         Args:
-            guidance_cfg: Guidance 初始化配置（cfg.guidance），包含：
-                - model_path: 模型路径
-                - edit_resolution: VAE 编码分辨率
-                - type: Guidance 类型
-            train_device: 训练设备
+            guidance_cfg: Guidance Initialization configuration (cfg.guidance), including:
+                - model_path: model path
+                - edit_resolution: VAE Encoding resolution
+                - type: Guidance Type
+            train_device: training equipment
         """
         self.train_device = train_device
         self.device = compute_guidance_device(train_device)
         self.edit_resolution = guidance_cfg.edit_resolution
-        
-        # 子类需要在 __init__ 中初始化 self.pipe
-    
+
+        # Subclasses need to be in __init__ Medium initialization self.pipe
+
     # =========================================================================
-    # 格式转换（共享）
+    # Format conversion (sharing)
     # =========================================================================
-    
+
     def tensor_to_pil(self, tensor: torch.Tensor) -> Image.Image:
         """
-        Tensor 转 PIL 图像。
-        
+        Tensor turn PIL images.
+
         Args:
             tensor: [C, H, W] float [0,1]
-        
+
         Returns:
             PIL.Image
         """
         arr = (tensor.detach().cpu().numpy() * 255).clip(0, 255).astype("uint8")
         return Image.fromarray(arr.transpose(1, 2, 0))
-    
+
     def pils_to_tensor(self, pils: List[Image.Image], size: Tuple[int, int]) -> torch.Tensor:
         """
-        PIL 图像列表转 Tensor。
-        
+        PIL Image list transfer Tensor.
+
         Args:
             pils: List[PIL.Image]
-            size: (W, H) 目标尺寸
-        
+            size: (W, H) target size
+
         Returns:
             [N, C, H, W] tensor
         """
         tensors = [TF.to_tensor(p.resize(size, Image.LANCZOS)) for p in pils]
         return torch.stack(tensors).to(self.device)
-    
+
     # =========================================================================
-    # 输入格式处理（共享）
+    # Input format processing (shared)
     # =========================================================================
-    
+
     def _reshape_input(self, comp_rgb: torch.Tensor) -> Tuple[torch.Tensor, int, int, int, int, int, torch.device]:
         """
-        统一处理输入格式。
-        
+        Uniform handling of input formats.
+
         Args:
-            comp_rgb: (B, V, H, W, C) 或 (B, V, C, H, W) 或 (N, C, H, W)
-        
+            comp_rgb: (B, V, H, W, C) or (B, V, C, H, W) or (N, C, H, W)
+
         Returns:
             (comp_rgb, B, V, C, H, W, source_device)
-            其中 comp_rgb 已转换为 [N, C, H, W] 并移动到 self.device
+            Among them comp_rgb converted to [N, C, H, W] and move to self.device
         """
         source_device = comp_rgb.device
-        
+
         if comp_rgb.dim() == 5:
             if comp_rgb.shape[-1] == 3:
                 # (B, V, H, W, C) → (N, C, H, W)
@@ -173,28 +173,28 @@ class BaseGuidance(ABC):
             # (N, C, H, W)
             B, V = 1, 1
             _, C, H, W = comp_rgb.shape
-        
+
         comp_rgb = comp_rgb.to(self.device)
-        
+
         return comp_rgb, B, V, C, H, W, source_device
-    
+
     # =========================================================================
-    # Latent 编码（共享）
+    # Latent Coding (sharing)
     # =========================================================================
-    
+
     def encode_to_latent(self, images: torch.Tensor) -> torch.Tensor:
         """
-        编码图像到 packed latent（可微分）。
-        
+        encode image to packed latent(differentiable).
+
         Args:
             images: [B, C, H, W] float [0,1]
-        
+
         Returns:
             [B, seq, C_lat] packed latent
         """
         B = images.shape[0]
-        
-        # Resize 到编辑分辨率
+
+        # Resize to editing resolution
         resized = F.interpolate(
             images,
             size=(self.edit_resolution, self.edit_resolution),
@@ -202,24 +202,24 @@ class BaseGuidance(ABC):
             align_corners=False,
             antialias=True,
         )  # [B, C, edit_res, edit_res]
-        
+
         # [0,1] → [-1,1]
         normalized = resized * 2 - 1  # [B, C, H, W]
         images_5d = normalized.unsqueeze(2).to(dtype=torch.bfloat16)  # [B, C, 1, H, W]
-        
-        # VAE encode（可微分）
+
+        # VAE encode(differentiable)
         latent_5d = self.pipe._encode_vae_image_differentiable(images_5d)  # [B, C_lat, 1, H_lat, W_lat]
-        
+
         # Pack
         _, C_lat, _, H_lat, W_lat = latent_5d.shape
         latent = self.pipe._pack_latents(latent_5d, B, C_lat, H_lat, W_lat)  # [B, seq, C_lat]
-        
+
         return latent.to(dtype=images.dtype)
-    
+
     # =========================================================================
-    # 抽象方法（子类必须实现）
+    # Abstract method (subclasses must implement it)
     # =========================================================================
-    
+
     @abstractmethod
     def _run_pipeline(
         self,
@@ -231,20 +231,20 @@ class BaseGuidance(ABC):
         V: int,
     ) -> Any:
         """
-        调用 Pipeline（无梯度）。
-        
+        call Pipeline(no gradient).
+
         Args:
-            comp_rgb: [N, C, H, W] 渲染图
-            condition_images: [B] 条件图
-            src_latent: [N, seq, C] latent（已 detach）
-            guidance_cfg: 运行时配置（prompt / steps / cfg scales 等）
-            B, V: batch size 和 views
-        
+            comp_rgb: [N, C, H, W] Rendering
+            condition_images: [B] Conditional diagram
+            src_latent: [N, seq, C] latent(Already detach)
+            guidance_cfg: Runtime configuration (prompt / steps / cfg scales etc.)
+            B, V: batch size and views
+
         Returns:
-            Pipeline 输出（FlowEditPipelineOutput）
+            Pipeline output(FlowEditPipelineOutput)
         """
         pass
-    
+
     @abstractmethod
     def _compute_loss(
         self,
@@ -254,25 +254,25 @@ class BaseGuidance(ABC):
         guidance_cfg: Any,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
-        计算 loss（真 loss，可直接 backward）。
-        
+        Calculate loss(True loss, can be directly backward).
+
         Args:
-            src_latent: [N, seq, C] 有梯度的 latent
-            pipeline_output: Pipeline 输出（包含 Tracker）
-            comp_rgb: [N, C, H, W] 渲染图（部分子类需要）
-            guidance_cfg: 运行时配置（loss 权重 / reduce 策略等）
-        
+            src_latent: [N, seq, C] Gradient latent
+            pipeline_output: Pipeline output (contains Tracker)
+            comp_rgb: [N, C, H, W] Rendering (required by some subclasses)
+            guidance_cfg: Runtime configuration (loss weight / reduce strategy, etc.)
+
         Returns:
             (loss, loss_dict)
-            - loss: 标量 loss（有梯度，可 backward）
-            - loss_dict: 各项 loss 字典（用于日志）
+            - loss: scalar loss(There is a gradient, which can be backward)
+            - loss_dict: various items loss Dictionary (for logging)
         """
         pass
-    
+
     # =========================================================================
-    # 主入口（模板方法）
+    # Main entrance (template method)
     # =========================================================================
-    
+
     def compute_guidance(
         self,
         comp_rgb: torch.Tensor,
@@ -282,35 +282,35 @@ class BaseGuidance(ABC):
         **kwargs,
     ) -> GuidanceResult:
         """
-        计算 Guidance loss（模板方法，真 Loss 模式）。
-        
-        统一流程：
-            1. 格式转换
-            2. 编码到 latent（一次，有梯度）
-            3. 调用 Pipeline（无梯度，传入 guidance_cfg）
-            4. 通过 Tracker.loss() 计算真 loss（传入 guidance_cfg）
-        
-        若只需要编辑后的图像而不需要 loss，请使用 FlowEditGuidance.edit()。
-        
+        Calculate Guidance loss(template method, true Loss mode).
+
+        Unified process:
+            1. format conversion
+            2. encode to latent(once, with gradient)
+            3. call Pipeline(no gradient, passed in guidance_cfg)
+            4. Pass Tracker.loss() Compute true loss(incoming guidance_cfg)
+
+        If you only need the edited image without loss, please use FlowEditGuidance.edit().
+
         Args:
-            comp_rgb: 渲染图像 (B,V,H,W,C) 或 (B,V,C,H,W)，float [0,1]
-            condition_images: 条件图像列表 [len=B] of PIL.Image
-            guidance_cfg: 运行时配置（per-stage），必须传入。
+            comp_rgb: render image (B,V,H,W,C) or (B,V,C,H,W),float [0,1]
+            condition_images: Conditional image list [len=B] of PIL.Image
+            guidance_cfg: Runtime configuration (per-stage), must be passed in.
                           trellis2: cfg.shape.guidance / cfg.tex.guidance
                           trellis:  cfg.train.guidance
-            **kwargs: 额外参数（如 rank）
-        
+            **kwargs: Additional parameters (such as rank)
+
         Returns:
-            GuidanceResult: 包含 loss 和可选的 edited_imgs
+            GuidanceResult: contains loss and optional edited_imgs
         """
-        # 1. 格式转换
+        # 1. format conversion
         comp_rgb, B, V, C, H, W, source_device = self._reshape_input(comp_rgb)
-        
-        # 2. 编码到 latent（无梯度，仅作为 FlowEdit 起点）
+
+        # 2. encode to latent(No gradient, just as FlowEdit starting point)
         with torch.no_grad():
             src_latent = self.encode_to_latent(comp_rgb)  # [N, seq, C_lat]
-        
-        # 3. 调用 Pipeline（无梯度）
+
+        # 3. call Pipeline(no gradient)
         with torch.no_grad():
             pipeline_output = self._run_pipeline(
                 comp_rgb,
@@ -319,23 +319,23 @@ class BaseGuidance(ABC):
                 guidance_cfg=guidance_cfg,
                 B=B, V=V,
             )
-        
-        # 4. 计算 loss（真 loss，有梯度）
+
+        # 4. Calculate loss(True loss, with gradient)
         loss, loss_dict = self._compute_loss(
             src_latent,
             pipeline_output,
             comp_rgb,
             guidance_cfg=guidance_cfg,
         )
-        
-        # 5. 移动到训练设备
+
+        # 5. Move to training device
         loss = loss.to(self.train_device)
-        
-        # 6. 返回结果（子类可通过 _build_result 自定义）
+
+        # 6. Return results (subclasses can pass _build_result Customized)
         return self._build_result(
             loss, loss_dict, pipeline_output, B, V, C, H, W, source_device
         )
-    
+
     def _build_result(
         self,
         loss: torch.Tensor,
@@ -345,15 +345,15 @@ class BaseGuidance(ABC):
         source_device: torch.device,
     ) -> GuidanceResult:
         """
-        构建返回结果。子类可覆盖以添加额外字段。
-        
+        Build returns results. Subclasses can override to add additional fields.
+
         Args:
-            loss: 主 loss
-            loss_dict: 各项 loss 字典
-            pipeline_output: Pipeline 输出
-            B, V, C, H, W: 维度信息
-            source_device: 原始设备
-        
+            loss: Lord loss
+            loss_dict: various items loss dictionary
+            pipeline_output: Pipeline output
+            B, V, C, H, W: Dimension information
+            source_device: original equipment
+
         Returns:
             GuidanceResult
         """
@@ -363,25 +363,25 @@ class BaseGuidance(ABC):
             loss_dict={self.loss_key: loss.detach(), **loss_dict},
             trackers=None,
         )
-    
+
     # =========================================================================
-    # 辅助方法
+    # Helper methods
     # =========================================================================
-    
+
     def get_loss_weights(self) -> Dict[str, float]:
         """
-        获取各项 loss 的权重。
-        
-        默认返回 {loss_key: 1.0}。
-        FlowEdit 可覆盖此方法，返回细分 loss 权重。
-        
+        Get each item loss weight.
+
+        Return by default {loss_key: 1.0}.
+        FlowEdit This method can be overridden to return the segment loss weight.
+
         Returns:
             Dict[str, float]: {loss_name: weight}
         """
         return {self.loss_key: 1.0}
-    
+
     def cleanup(self) -> None:
-        """释放资源。"""
+        """Release resources."""
         if hasattr(self, 'pipe'):
             del self.pipe
         torch.cuda.empty_cache()
