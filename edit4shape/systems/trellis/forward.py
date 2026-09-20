@@ -1,7 +1,7 @@
 """
 Trellis 共享前向传播、渲染、评估函数。
 
-从 system.py 提取的纯计算函数，供 standard / autograd / bilevel 入口复用。
+从 system.py 提取的纯计算函数，供 retained Dual-Stage 入口与评估器复用。
 
 主要组件：
 1. decode_and_render_mesh: 解码 SparseTensor → Mesh → 渲染多视角图像
@@ -250,94 +250,6 @@ def trellis_forward(
 
 
 # =====================================================================
-# 前向传播 - Hybrid 双路渲染（Mesh Normal + GS Color）
-# =====================================================================
-
-def trellis_forward_hybrid(
-    system: TrellisSystem,
-    state: TrellisState,
-    cfg: ml_collections.ConfigDict,
-    device: torch.device,
-    global_step: int,
-    is_training: bool = True,
-) -> Dict[str, Any]:
-    """
-    Hybrid 模式前向传播：Dense Sampling → Rollout → 双路 Decode & Render。
-
-    与 trellis_forward 的区别：解码阶段分别用 mesh 和 gs 渲染器，
-    将 normal 挂载到 state.views_generated.normal_tensor，
-    将 color 挂载到 state.views_generated.image_tensor。
-
-    Args:
-        system: 系统组件（pipeline、renderers 含 "mesh" + "gs"）
-        state: TrellisState 状态对象（已挂载 batch 数据，含条件编码）
-        cfg: 配置对象
-        device: 运行设备
-        global_step: 全局步数（用于随机种子）
-        is_training: 是否为训练模式
-
-    Returns:
-        render_out: 渲染输出字典，包含：
-            - "normal": (B,V,H,W,C) Mesh Normal
-            - "color": (B,V,H,W,C) GS Color
-            - "meshes": list[B] of MeshExtractResult
-            - "gaussians": list[B] of Gaussian
-    """
-    pipeline = system.pipeline
-
-    # 评估时使用固定种子（确保可复现），训练时按 step 变化
-    _seed = int(cfg.seed) if not is_training else int(cfg.seed) + global_step
-
-    # ---- 1. Dense Sampling（与 trellis_forward 相同）----
-    if state.coords is None:
-        generator_dense = torch.Generator(device='cpu').manual_seed(_seed)
-        with torch.no_grad():
-            rollout_dense(state, cfg, system, device, generator=generator_dense)
-        batch_size = state.stage1.z0.shape[0]
-        state.coords = pipeline.dense.decode_to_coords(
-            state.stage1.z0, batch_size=batch_size,
-        )  # (B*T, 4)
-
-    # ---- 2. Rollout（与 trellis_forward 相同）----
-    generator = torch.Generator(device=device).manual_seed(_seed)
-    rollout_sparse(
-        state, cfg, system, device,
-        generator=generator,
-        is_training=is_training,
-    )
-    latents = state.stage2.z0  # SparseTensor
-
-    # 释放 rollout 阶段产生的显存碎片，为 decode 腾出空间
-    torch.cuda.empty_cache()
-
-    # ---- 3. 双路解码 & 渲染 ----
-    # Mesh Normal 路
-    mesh_renderer = system.renderers["mesh"]
-    mesh_out = decode_and_render_mesh(
-        latents, state.cameras, pipeline, mesh_renderer, device
-    )  # dict with "color"/"normal"/"depth": (B,V,H,W,C), "meshes": list
-
-    # GS Color 路
-    gs_renderer = system.renderers["gs"]
-    gs_out = decode_and_render_gs(
-        latents, state.cameras, pipeline, gs_renderer, device
-    )  # dict with "color": (B,V,H,W,C), "gaussians": list
-
-    # 挂载到 state（与 TrellisVisualIO.save_batch_eval 对齐）
-    state.views_generated.normal_tensor = mesh_out["normal"]  # (B,V,H,W,C) Mesh Normal
-    state.views_generated.image_tensor = gs_out["color"]      # (B,V,H,W,C) GS Color
-
-    # 合并输出
-    render_out: Dict[str, Any] = {
-        "normal": mesh_out["normal"],      # (B,V,H,W,C)
-        "color": gs_out["color"],          # (B,V,H,W,C)
-        "meshes": mesh_out["meshes"],      # list[B]
-        "gaussians": gs_out["gaussians"],  # list[B]
-    }
-    return render_out
-
-
-# =====================================================================
 # 评估 - 推理与可视化保存
 # =====================================================================
 
@@ -430,70 +342,3 @@ def evaluate(
             )
 
     return {"eval_done": 1.0}
-
-
-# =====================================================================
-# Hybrid 专用评估
-# =====================================================================
-
-@torch.no_grad()
-def evaluate_hybrid(
-    system: TrellisSystem,
-    cfg: ml_collections.ConfigDict,
-    accelerator: Accelerator,
-    epoch: int,
-    global_step: int,
-    eval_loader=None,
-    visuals_eval_dir=None,
-) -> dict:
-    """
-    Hybrid 专用评估：分别用 mesh + gs 渲染，保存 normal + color。
-
-    与通用 evaluate 的区别：使用 trellis_forward_hybrid 进行双路解码渲染，
-    将 Mesh Normal 和 GS Color 分别挂载到 state.views_generated 并保存。
-    """
-    if eval_loader is None:
-        return {}
-
-    # ---- 固定随机种子，确保每次评估结果可复现 ----
-    eval_seed = int(cfg.seed)
-    torch.manual_seed(eval_seed)
-    torch.cuda.manual_seed_all(eval_seed)
-
-    pipeline = system.pipeline
-    visual_io = TrellisVisualIO(
-        visuals_eval_dir, target_h=cfg.renderer.resolution, accelerator=accelerator,
-    )
-
-    pipe_models = pipeline.pipe.models
-    inference_ctx = (
-        system.strategy.inference_context() if system.strategy else nullcontext()
-    )
-
-    with inference_ctx, EvalModeGuard(
-        pipe_models['slat_flow_model'],
-        pipe_models['slat_decoder_mesh'],
-        pipe_models['slat_decoder_gs'],
-    ):
-        for batch_idx, batch in enumerate(eval_loader):
-            state = TrellisState()
-            state.attach_batch(batch, pipeline=pipeline)
-
-            # ★ 使用 hybrid 前向：同时渲染 mesh normal + gs color
-            render_out = trellis_forward_hybrid(
-                system, state, cfg, accelerator.device, global_step,
-                is_training=False,
-            )
-
-            # save_batch_eval 会自动检查 normal_tensor 和 image_tensor
-            visual_io.save_batch_eval(
-                state=state,
-                epoch=epoch,
-                render_out=render_out,
-                pipeline=pipeline,
-                export_mesh=True,
-            )
-
-    return {"eval_done": 1.0}
-
-

@@ -1,22 +1,7 @@
-"""
-Qwen-Image-Edit Pipeline 模块。
+"""Retained Qwen-Image-Edit FlowEdit pipeline exports.
 
-包含：
-- FlowEditFullPipeline: FlowEdit 完整版（双分支模型推理）
-- QwenImageDistillationPipeline: 蒸馏 Pipeline
-- StateTracker: 统一状态追踪器（random / fixed / aligned 模式）
-- InversionStateTracker: Inversion 状态追踪器（inversion_* 模式）
-- create_distillation_tracker: 工厂函数，根据 noise_mode 创建对应 Tracker（distillation 用）
-- create_flowedit_tracker: 工厂函数，根据 noise_mode 创建对应 Tracker（flowedit 用）
-- DifferentiableVAEMixin: 可微分 VAE 编码 Mixin
-
-噪声模式：
-- "random": 每步随机噪声
-- "fixed": 固定噪声
-- "aligned": DNAEdit 风格累积补偿
-- "inversion_cond": Naive Inversion（用 v_cond）
-- "inversion_uncond": Naive Inversion（用 v_uncond）
-- "inversion_cfg": Naive Inversion（用 v_cfg）
+The ordinary FlowEdit pipeline uses StateTracker with random/fixed/aligned/delta
+noise modes.  Only the retained pipeline, tracker, and VAE helper are exported.
 """
 
 from edit4shape.guidance.pipelines.qwen_image_edit.flowedit_full import (
@@ -25,33 +10,14 @@ from edit4shape.guidance.pipelines.qwen_image_edit.flowedit_full import (
 )
 from edit4shape.guidance.pipelines.qwen_image_edit.trackers import (
     StateTracker,
-    InversionStateTracker,
-    create_distillation_tracker,
     create_flowedit_tracker,
 )
 from edit4shape.guidance.pipelines.utils import DifferentiableVAEMixin
-from edit4shape.guidance.pipelines.qwen_image_edit.distillation import (
-    QwenImageDistillationPipeline,
-    DistillationOutput,
-)
-from edit4shape.guidance.pipelines.qwen_image_edit.bilevel_distillation import (
-    QwenImageBilevelDistillationPipeline,
-    BilevelDistillationOutput,
-)
 
 __all__ = [
-    # Pipeline
     "FlowEditFullPipeline",
     "FlowEditPipelineOutput",
-    "QwenImageDistillationPipeline",
-    "DistillationOutput",
-    "QwenImageBilevelDistillationPipeline",
-    "BilevelDistillationOutput",
-    # Tracker
     "StateTracker",
-    "InversionStateTracker",
-    "create_distillation_tracker",
     "create_flowedit_tracker",
-    # Mixin
     "DifferentiableVAEMixin",
 ]

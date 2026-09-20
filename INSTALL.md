@@ -6,9 +6,6 @@
 
 ### 一次安装（复制即可）
 ```bash
-# 进入项目
-cd /home/zhiyuan_ma/code/flow_grpo_custom
-
 # 创建并激活环境
 conda create -n grpo3d python=3.10 -y && \
 source /home/zhiyuan_ma/miniconda3/etc/profile.d/conda.sh && conda activate grpo3d
@@ -45,20 +42,6 @@ python ./scripts/download/download_dinov2.py \
   --out ./pretrained_weights/dinov2-giant
 ```
 
-### 安装 Direct3D‑S2 参考代码与 CUDA 扩展（udf_ext）
-```bash
-# 编译并安装 Direct3D‑S2 的 CUDA 扩展（udf_ext）
-python -m pip install -v --no-build-isolation \
-  ./_reference_codes/Direct3D-S2/third_party/voxelize
-
-# 以可编辑模式安装 Direct3D‑S2 包（供训练脚本导入）
-python -m pip install -v -e \
-  ./_reference_codes/Direct3D-S2
-
-# 运行期如遇到 libc10.so 找不到，可在当前会话设置（训练脚本已自动处理 NVRTC/NVJITLINK）
-export LD_LIBRARY_PATH=/home/zhiyuan_ma/miniconda3/envs/grpo3d/lib/python3.10/site-packages/torch/lib:$LD_LIBRARY_PATH
-```
-
 ### 可选：安装 torchsparse（源码编译，无需 root）
 ```bash
 # 1) 安装 sparsehash 头文件（conda，无需 root）
@@ -92,18 +75,3 @@ python -c "import torchsparse; print('OK')"
   export WANDB_DISABLED=1
   ```
  -->
-
-### Direct3D‑S2 预训练权重（512-only）
-
-本节记录在本机完成的 Direct3D‑S2（仅 512 分支）权重下载步骤与校验信息，便于复现与核验。
-
-#### 前置条件
-- 已准备好 `grpo3d` 环境，并安装 `huggingface_hub`（随 `requirements.txt` 一同安装）。
-- 无需激活环境，直接使用环境内的 Python 绝对路径执行。
-
-#### 下载命令（已实测）
-```bash
-python \
-./scripts/download/download_direct3d_s2.py \
---out .//pretrained_weights/direct3d_s2-v-1-1
-```

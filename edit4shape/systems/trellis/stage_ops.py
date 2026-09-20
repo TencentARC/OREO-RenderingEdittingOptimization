@@ -6,19 +6,9 @@ ABC (StageOps) 定义在 edit4shape.systems.utils.stage_ops，
 
 实现：
   TrellisOps      — 通用单阶段，根据 cfg.renderer.type 分发 mesh/gs 渲染
-  TrellisMeshOps  — 强制 Mesh Normal 渲染（覆写 decode_render_dict）
-  TrellisGsOps    — 强制 GS Color 渲染（覆写 decode_render_dict）
-
-使用方式：
-  from edit4shape.systems.trellis.stage_ops import TrellisOps
-  from edit4shape.systems.trellis.autograd_template import trellis_three_phase_step
-
-  trellis_three_phase_step(TrellisOps(), state, system, ...)
 
 设计原则：
-  - 同一个 TrellisOps 在 standard / autograd / bilevel 入口中一行不改
-  - 子类仅需覆写 decode_render_dict 即可切换渲染策略
-  - 清理策略由编排层的 clean_for_vjp 回调注入
+  - FlowEdit/Contrastive Ops 复用 TrellisOps 的 rollout、render 和 VJP 基础设施
   - vjp_loop 手动合并 reg_grads（适配 3-sub-step Phase 2）
 """
 
@@ -26,7 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import numpy as np
 import torch
@@ -101,8 +91,7 @@ class TrellisOps(StageOps):
         """
         根据 cfg.renderer.type 分发到 mesh 或 gs 渲染。
 
-        子类可覆写此方法以实现自定义渲染策略
-        （如 TrellisMeshOps / TrellisGsOps / 自定义混合渲染）。
+        FlowEdit/Contrastive 子类复用此方法，按 retained config 选择渲染器。
         """
         latents = state.stage2.z0
         device = system.accelerator.device
@@ -218,101 +207,6 @@ class TrellisOps(StageOps):
         )
 
         return log
-
-
-# =====================================================================
-# 显式渲染策略子类
-# =====================================================================
-
-class TrellisMeshOps(TrellisOps):
-    """强制使用 Mesh Normal 渲染，不受 cfg.renderer.type 控制。"""
-
-    def decode_render_dict(self, state, system) -> Dict[str, Any]:
-        render_out = decode_and_render_mesh(
-            state.stage2.z0, state.cameras,
-            system.pipeline, system.renderers["mesh"], system.accelerator.device,
-        )
-        render_out["color"] = render_out["normal"]
-        return render_out
-
-
-class TrellisGsOps(TrellisOps):
-    """强制使用 GS Color 渲染，不受 cfg.renderer.type 控制。"""
-
-    def decode_render_dict(self, state, system) -> Dict[str, Any]:
-        return decode_and_render_gs(
-            state.stage2.z0, state.cameras,
-            system.pipeline, system.renderers["gs"], system.accelerator.device,
-        )
-
-
-# =====================================================================
-# 双路渲染 — Mesh Normal + GS Color 同时提供 guidance
-# =====================================================================
-
-class TrellisHybridOps(TrellisOps):
-    """
-    双路渲染 Ops：Mesh Normal + GS Color，各自独立提供 guidance。
-
-    设计：
-      - decode_render_dict(renderer_key=...) 按指定渲染器分发
-      - get_render_passes() 返回多路渲染配置，供 hybrid 编排循环使用
-      - 继承 TrellisOps 的 rollout / pre_rollout / vjp_loop（共享 SLAT Flow Model）
-
-    使用方式：
-      from edit4shape.systems.trellis.stage_ops import TrellisHybridOps
-      from edit4shape.systems.trellis.autograd_template import trellis_hybrid_three_phase_step
-
-      trellis_hybrid_three_phase_step(TrellisHybridOps(), state, system, ...)
-
-    配置要求（cfg.train 下）：
-      guidance_normal:      Mesh Normal guidance 配置
-      guidance_color:       GS Color guidance 配置
-      loss.guidance_normal: Mesh Normal guidance 权重
-      loss.guidance_color:  GS Color guidance 权重
-    """
-
-    def decode_render_dict(self, state, system, renderer_key: str = "gs") -> Dict[str, Any]:
-        """
-        按 renderer_key 分发到指定渲染器。
-
-        Args:
-            state: TrellisState
-            system: TrellisSystem（需 renderers 包含 "mesh" 和 "gs"）
-            renderer_key: "mesh" 或 "gs"
-
-        Returns:
-            渲染输出字典，"color" key 统一为各渲染器的主要输出：
-              mesh → normal,  gs → color
-        """
-        latents = state.stage2.z0
-        device = system.accelerator.device
-        renderer = system.renderers[renderer_key]
-
-        if renderer_key == "gs":
-            return decode_and_render_gs(
-                latents, state.cameras, system.pipeline, renderer, device,
-            )
-        else:
-            render_out = decode_and_render_mesh(
-                latents, state.cameras, system.pipeline, renderer, device,
-            )
-            render_out["color"] = render_out["normal"]
-            return render_out
-
-    def get_render_passes(self, system) -> List[Tuple[str, Any, float]]:
-        """
-        返回多路渲染配置列表。
-
-        Returns:
-            [(renderer_key, guidance_cfg, guidance_weight), ...] 的列表。
-            编排函数会循环处理每一路：P2a → P2b → P2c。
-        """
-        cfg = system.cfg
-        return [
-            ("mesh", cfg.train.guidance_normal, cfg.train.loss.guidance_normal),
-            ("gs", cfg.train.guidance_color, cfg.train.loss.guidance_color),
-        ]
 
 
 # =====================================================================

@@ -25,9 +25,6 @@ AsyncGuidanceResult:
 Usage:
     class FlowEditGuidancePP(PipelineParallelMixin, FlowEditGuidance):
         pass
-    
-    class DistillationGuidancePP(PipelineParallelMixin, DistillationGuidance):
-        pass
 """
 
 import logging

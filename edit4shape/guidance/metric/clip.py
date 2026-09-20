@@ -17,7 +17,7 @@ class CLIPMetric(BaseMetric):
     使用 CLIP Vision Encoder 提取图像级特征，计算余弦相似度，loss = 1 - similarity。
     保持可导：rendered 保持梯度，target 无梯度。
     
-    参考：reward_models/rewards.py 中 CLIPModel 的使用方式。
+    使用独立 CLIP 模型实现 retained FlowEdit metric。
     """
     
     name = "clip"

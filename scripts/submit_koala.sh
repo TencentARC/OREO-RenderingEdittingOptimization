@@ -30,7 +30,7 @@ if [[ "${1:-}" == "--train" ]]; then
         --code "$S3:/data/work/run_codes" \
         -m normal -g 8 --s3-log \
         -j "trellis-distill" \
-        -c "cd /data/work/run_codes && . scripts/setup_koala.sh --fast && RUN_NAME=trellis_stage2_distill bash scripts/multi_node/main_trellis_distilation.sh" \
+        -c "cd /data/work/run_codes && . scripts/setup_koala.sh --fast && bash scripts/multi_node/main_trellis_dualstage_contrast.sh" \
         "$@"
 else
     echo "Submitting DEBUG pod (1 GPU, SSH)..."
@@ -43,5 +43,5 @@ else
     echo "  2. cd /data/work/run_codes"
     echo "  3. . scripts/setup_koala.sh --download   # 首次"
     echo "  4. . scripts/setup_koala.sh --fast       # 日常"
-    echo "  5. bash scripts/multi_node/main_trellis_distilation.sh  # 单卡试跑"
+    echo "  5. bash scripts/single_node/main_trellis_dualstage_contrastive.sh  # 单卡试跑"
 fi
