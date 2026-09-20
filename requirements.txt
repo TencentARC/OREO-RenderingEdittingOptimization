@@ -149,4 +149,4 @@ deepspeed==0.16.4         # Large model training optimization
 #    - kaolin of wheel The index must match the target torch 2.6.0 / CUDA 12.4 Alignment
 #
 # 6. Verify installation:
-#    python -c "import torch, flash_attn, spconv, kaolin; print('✅ Core dependencies installed successfully')"
+#    python -c "import torch, flash_attn, spconv, kaolin, nvdiffrast, diff_gaussian_rasterization, pytorch_msssim; print('Core dependencies installed successfully')"
