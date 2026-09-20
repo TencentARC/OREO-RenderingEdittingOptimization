@@ -1,4 +1,4 @@
-"""DINOv3 Feature similarity loss."""
+"""DINOv2 feature similarity loss."""
 import logging
 from typing import Optional
 
@@ -12,9 +12,9 @@ from .base import BaseMetric
 
 class DINOMetric(BaseMetric):
     """
-    DINOv3 feature space similarity Metric.
+    DINOv2 feature space similarity Metric.
 
-    Use DINOv3 Extract features and calculate cosine similarity,loss = 1 - similarity.
+    Use DINOv2 to extract features and calculate cosine similarity, loss = 1 - similarity.
     Stay derivable:rendered Keep the gradient,target No gradient.
     """
 
@@ -24,13 +24,13 @@ class DINOMetric(BaseMetric):
         self,
         weight: float,
         device: torch.device,
-        model_path: str = "pretrained_weights/dinov3-vitl16-pretrain-lvd1689m/facebook/dinov3-vitl16-pretrain-lvd1689m",
+        model_path: str = "pretrained_weights/dinov2-giant",
         image_size: int = 518,
         **kwargs,
     ):
         super().__init__(weight, device)
 
-        logging.info(f"[DINOMetric] Loading DINOv3: {model_path}")
+        logging.info(f"[DINOMetric] Loading DINOv2: {model_path}")
         self.processor = AutoImageProcessor.from_pretrained(model_path)
         self.model = AutoModel.from_pretrained(model_path, torch_dtype=torch.float32).to(device).eval()
         for p in self.model.parameters():
@@ -48,7 +48,7 @@ class DINOMetric(BaseMetric):
         target: torch.Tensor,    # (B,C,H,W) [0,1], no gradient
         **kwargs,
     ) -> Optional[torch.Tensor]:
-        """Calculate DINOv3 Feature similarity loss."""
+        """Calculate DINOv2 feature similarity loss."""
         # Resize(derivable)
         r = F.interpolate(rendered, size=(self.size, self.size), mode='bilinear', align_corners=False)  # (B,C,size,size)
         t = F.interpolate(target.detach(), size=(self.size, self.size), mode='bilinear', align_corners=False)  # (B,C,size,size)
@@ -96,4 +96,3 @@ class DINOMetric(BaseMetric):
         if hasattr(self, 'model'):
             del self.model
             logging.info("[DINOMetric] Cleaned up.")
-

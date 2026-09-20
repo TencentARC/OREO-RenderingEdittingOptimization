@@ -19,6 +19,8 @@ The verified environment uses:
 | Safetensors | 0.8.0 |
 | Flash Attention | 2.7.3 |
 | Spconv | 2.3.8 |
+| PEFT | 0.17.1 |
+| Open3D | 0.19.0 |
 
 Use Linux with an NVIDIA GPU and a CUDA 12.4 compatible driver. The remaining Python dependencies are pinned in [`requirements.txt`](requirements.txt). Do not upgrade Transformers to 5.x in this environment. Build Flash Attention after installing the matching PyTorch wheel.
 
@@ -33,11 +35,24 @@ pip install torch==2.6.0+cu124 torchvision==0.21.0+cu124 \
 pip install spconv-cu124==2.3.8
 pip install kaolin \
   -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.6.0_cu124.html
+pip install peft==0.17.1
 
 export TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0"
 pip install --no-build-isolation flash-attn==2.7.3
 pip install git+https://github.com/NVlabs/nvdiffrast.git@v0.3.3
+pip install --no-build-isolation \
+  "git+https://github.com/autonomousvision/mip-splatting.git#subdirectory=submodules/diff-gaussian-rasterization"
 pip install -r requirements.txt
+```
+
+Install the reference implementations required by the TRELLIS adapter:
+
+```bash
+mkdir -p _reference_codes
+git clone --recursive https://github.com/microsoft/TRELLIS.git \
+  _reference_codes/TRELLIS
+git clone https://github.com/VAST-AI-Research/TripoSF.git \
+  _reference_codes/TripoSF
 ```
 
 Set the runtime variables before training or evaluation:
@@ -73,21 +88,11 @@ Download the local evaluation assets when their metrics are needed:
 ```bash
 python scripts/download/download_clip.py
 python scripts/download/download_dinov2.py --mode hf \
+  --repo facebook/dinov2-giant \
   --dest pretrained_weights/dinov2-giant
 ```
 
-CLIP is used by the canonical evaluator. DINOv2 is used by training. The DINO metric uses the public DINOv3 ViT-L/16 checkpoint:
-
-```bash
-python - <<'PY'
-from huggingface_hub import snapshot_download
-
-snapshot_download(
-    "facebook/dinov3-vitl16-pretrain-lvd1689m",
-    local_dir="pretrained_weights/dinov3-vitl16-pretrain-lvd1689m/facebook/dinov3-vitl16-pretrain-lvd1689m",
-)
-PY
-```
+CLIP and DINOv2 are used by the canonical evaluator. Both checkpoints are publicly downloadable.
 
 ## Download datasets
 
@@ -122,6 +127,7 @@ Keep the following paths available from the repository root:
 
 ```text
 pretrained_weights/TRELLIS-image-large
+pretrained_weights/dinov2-giant
 dataset/alphaimages_v3/train
 dataset/alphaimages_v3/test
 ```

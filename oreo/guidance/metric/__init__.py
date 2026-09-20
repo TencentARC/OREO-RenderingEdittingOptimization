@@ -5,7 +5,7 @@ Provides a unified similarity calculation interface and supports:
 - MSE: Pixel space mean square error
 - SSIM: structural similarity
 - LPIPS: perceived similarity (VGG Features)
-- DINO: DINOv3 feature similarity
+- DINO: DINOv2 feature similarity
 - CLIP: CLIP Image feature similarity
 
 Note:latent_csd and latent_mse by StateTracker.loss() Compute, don't register here.
@@ -90,7 +90,6 @@ __all__ = [
     "METRIC_REGISTRY",
     "create_metrics",
 ]
-
 
 
 

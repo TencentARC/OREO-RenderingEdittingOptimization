@@ -13,7 +13,7 @@ tokenizers==0.22.0        # with transformers 4.57.6 Alignment
 # build-with-no-isolation: flash-attn==2.7.3
 #   cannot be caused by requirements.txt Install directly; please follow the steps at the end of the article. torch Then compile it separately.
 spconv-cu124==2.3.8       # TRELLIS sparse convolution(import named spconv)
-peft==0.10.0              # Efficient fine-tuning of parameters
+peft==0.17.1              # Required by diffusers 0.38.0
 huggingface-hub>=0.25.0   # Model download/cache
 omegaconf==2.3.0          # configure system (Direct3D‑S2 See implementation dependencies)
 absl-py==2.3.1            # training script with VGGTObj Use
@@ -23,7 +23,7 @@ absl-py==2.3.1            # training script with VGGTObj Use
 trimesh==4.6.13           # 3D Grid processing
 Pillow==10.4.0            # Image processing (refer to reasoning use)
 tqdm==4.67.1              # Progress bar (refer to reasoning use)
-open3d==0.17.0            # 3D Data processing and visualization
+open3d==0.19.0            # Python 3.12-compatible 3D data processing
 plyfile==1.1.2            # PLY File format support
 xatlas==0.0.11            # UV Mapping tools
 pyvista==0.46.0           # 3D Visualization
@@ -53,9 +53,13 @@ pymatting==1.1.14         # Image cutout
 timm==1.0.16              # Pretrained vision model
 open-clip-torch==2.32.0   # CLIP Model support
 lpips==0.1.4              # Perceptual loss calculation
+pytorch-msssim==1.0.0    # SSIM metric
 
 # === 3D Rendering and processing ===
 # nvdiffrast==0.3.3         # NVIDIA Differentiable renderer (consistent with current environment)
+# The following CUDA extensions must be installed after PyTorch with --no-build-isolation:
+# git+https://github.com/NVlabs/nvdiffrast.git@v0.3.3
+# git+https://github.com/autonomousvision/mip-splatting.git#subdirectory=submodules/diff-gaussian-rasterization
 
 # === Performance optimization and computing ===
 triton==3.2.0             # with torch 2.6.0 wheel match
