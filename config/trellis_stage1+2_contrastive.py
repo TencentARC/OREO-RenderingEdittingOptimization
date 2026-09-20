@@ -85,7 +85,7 @@ def get_config():
     cfg = ml_collections.ConfigDict()
 
     # === General ===
-    cfg.run_name = "trellis_dualstage_contrastive"
+    cfg.run_name = "trellis_oreo"
     cfg.use_wandb = False
     cfg.seed = 42
     cfg.logdir = "logs"
@@ -150,7 +150,7 @@ def get_config():
 
     # Student 单步去噪是否使用 CFG（同时控制 P3.5 reg teacher）
     # True = 保持 pipeline 默认, False = 跳过 uncond forward pass
-    tr.student_denoise_cfg = False
+    tr.student_denoise_cfg = True
 
     tr.gradient_accumulation_steps = 1
     tr.optimizer = ml_collections.ConfigDict()
@@ -192,8 +192,8 @@ def get_config():
 
     # ★ Contrastive loss 配置
     tr.loss.contrastive = ml_collections.ConfigDict()
-    tr.loss.contrastive.ada = False
-    tr.loss.contrastive.eps = 1e-1
+    tr.loss.contrastive.ada = True
+    tr.loss.contrastive.eps = 0.1
     tr.loss.contrastive.adaptive_swap = False
     # 对比 teacher 正/负样本是否使用 CFG（独立于 student_denoise_cfg）
     # True = teacher 保持 CFG（zeros uncond），False = teacher 不用 CFG

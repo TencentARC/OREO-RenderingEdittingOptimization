@@ -14,7 +14,7 @@ export CUDA_VISIBLE_DEVICES
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 GPU_COUNT=$(echo "$CUDA_VISIBLE_DEVICES" | tr ',' '\n' | wc -l)
 TRAIN_GPU_COUNT=$GPU_COUNT
-RUN_NAME="${RUN_NAME:-trellis_dualstage_contrastive_single}"
+RUN_NAME="${RUN_NAME:-trellis_oreo}"
 
 echo "========================================"
 echo "GPU 分配信息"
