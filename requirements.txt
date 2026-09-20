@@ -37,7 +37,7 @@ git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057
 # 请勿在这个环境中混装 xformers；如需它，请建立独立的锁定环境。
 
 # === Direct3D‑S2 可选依赖说明（不自动安装） ===
-# - 参考包 direct3d_s2 放在 `_reference_codes/Direct3D-S2`，需按 INSTALL.md 手动安装：
+# - 参考包 direct3d_s2 放在 `_reference_codes/Direct3D-S2`，需按 SETUP.md 手动安装：
 #   1) pip install -v --no-build-isolation _reference_codes/Direct3D-S2/third_party/voxelize  # 编译 udf_ext
 #   2) pip install -v -e _reference_codes/Direct3D-S2                                        # 安装 direct3d_s2
 # - 若切换到 torchsparse 后端训练，需从源码安装 torchsparse，并可能需要系统包 libsparsehash-dev
@@ -137,8 +137,7 @@ deepspeed==0.16.4         # 大模型训练优化
 #    export CUDA_VISIBLE_DEVICES=0    # 指定GPU
 #
 # 4. 使用建议:
-#    # 推荐使用项目提供的脚本
-#    ./scripts/run_trellis.sh python your_script.py
+#    # 推荐使用 SETUP.md 中的训练、评估和 Koala 脚本
 #
 # 5. 已知问题:
 #    - 不要将 transformers 升级到 5.x；diffusers 0.38.0 的 Qwen prompt encoding 与其不兼容
@@ -147,4 +146,3 @@ deepspeed==0.16.4         # 大模型训练优化
 #
 # 6. 验证安装:
 #    python -c "import torch, flash_attn, spconv, kaolin; print('✅ 核心依赖安装成功')"
-#    ./scripts/run_trellis.sh python scripts/test_trellis_with_model.py
