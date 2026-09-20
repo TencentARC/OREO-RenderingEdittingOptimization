@@ -1,6 +1,6 @@
 """TRELLIS Dual-Stage Contrastive FlowEdit 训练配置 — Sparse + Dense 双阶段对比学习。
 
-对应入口: edit4shape.systems.trellis.entries.contrastive_dualstage_autograd
+对应入口: edit4shape.systems.trellis.entries.oreo_autograd
 
 训练流程：
   ── Sparse Stage ──

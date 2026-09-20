@@ -10,9 +10,9 @@ import importlib.util
 from pathlib import Path
 
 
-_BASE_CONFIG_PATH = Path(__file__).with_name("trellis_stage1+2_contrastive.py")
+_BASE_CONFIG_PATH = Path(__file__).with_name("trellis_oreo.py")
 _BASE_CONFIG_SPEC = importlib.util.spec_from_file_location(
-    "_trellis_stage1_2_contrastive_base",
+    "_trellis_oreo_base",
     str(_BASE_CONFIG_PATH),
 )
 if _BASE_CONFIG_SPEC is None or _BASE_CONFIG_SPEC.loader is None:

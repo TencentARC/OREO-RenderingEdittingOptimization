@@ -66,7 +66,7 @@ case "$EVAL_DATASET" in
         ;;
 esac
 LOGDIR_ROOT="logs_for_eval"
-CONFIG="config/trellis_stage1+2_contrastive.py"
+CONFIG="config/trellis_oreo.py"
 
 GPU_COUNT=$(echo "$CUDA_VISIBLE_DEVICES" | tr ',' '\n' | wc -l)
 CKPT_INPUT="${CKPT_INPUT%/}"

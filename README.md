@@ -25,12 +25,12 @@ See [`SETUP.md`](SETUP.md) for the Python/CUDA environment, public model downloa
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 \
-bash scripts/single_node/main_trellis_dualstage_contrastive.sh
+bash scripts/single_node/main_trellis_oreo.sh
 ```
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
-bash scripts/multi_node/main_trellis_dualstage_contrast.sh
+bash scripts/multi_node/main_trellis_oreo.sh
 ```
 
 ## Evaluation

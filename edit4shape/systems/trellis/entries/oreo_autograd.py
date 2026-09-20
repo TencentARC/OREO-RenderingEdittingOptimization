@@ -102,7 +102,7 @@ def main(argv) -> None:
 
     if cfg.use_wandb and accelerator.is_main_process:
         accelerator.init_trackers(
-            project_name="trellis-dual-contrastive",
+            project_name="trellis_oreo",
             config=dict(cfg),
             init_kwargs={"wandb": {"name": cfg.run_name}},
         )

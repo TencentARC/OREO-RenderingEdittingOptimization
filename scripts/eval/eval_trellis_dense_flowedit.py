@@ -12,7 +12,7 @@ Dense FlowEdit 评估脚本。
 
 用法（单卡）：
   python scripts/eval/eval_trellis_dense_flowedit.py \
-    --config=config/trellis_stage1+2_contrastive.py \
+    --config=config/trellis_oreo.py \
     --config.checkpoint=/path/to/ckpt \
     --config.rollout.flowedit.n_max=9 \
     --config.rollout.flowedit.cfg_scale_tgt=3.0 \
@@ -20,7 +20,7 @@ Dense FlowEdit 评估脚本。
 
 用法（DDP 多卡）：
   accelerate launch scripts/eval/eval_trellis_dense_flowedit.py \
-    --config=config/trellis_stage1+2_contrastive.py ...
+    --config=config/trellis_oreo.py ...
 """
 
 import csv

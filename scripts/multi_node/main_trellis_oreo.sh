@@ -9,8 +9,8 @@
 # - 全部 N 张卡同时用于 Trellis 训练 (DDP) 和 Guidance (FlowEdit)
 #
 # 使用示例：
-# - 默认 8 张卡：CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 ./main_trellis_dualstage_contrast.sh
-# - 自定义：CUDA_VISIBLE_DEVICES=4,5,6,7 ./main_trellis_dualstage_contrast.sh
+# - 默认 8 张卡：CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 ./main_trellis_oreo.sh
+# - 自定义：CUDA_VISIBLE_DEVICES=4,5,6,7 ./main_trellis_oreo.sh
 
 : "${CUDA_VISIBLE_DEVICES:=0,1,2,3,4,5,6,7}"
 RUN_NAME="${RUN_NAME:-trellis_oreo}"
@@ -34,8 +34,8 @@ python -m accelerate.commands.launch \
   --num_processes=${TRAIN_GPU_COUNT} \
   --multi_gpu \
   --main_process_port=${MASTER_PORT} \
-  -m edit4shape.systems.trellis.entries.contrastive_dualstage_autograd \
-  --config=config/trellis_stage1+2_contrastive.py \
+  -m edit4shape.systems.trellis.entries.oreo_autograd \
+  --config=config/trellis_oreo.py \
   --config.eval_only=False \
   --config.use_wandb=True \
   --config.run_name="$RUN_NAME" \
