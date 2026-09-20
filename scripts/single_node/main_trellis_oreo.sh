@@ -26,7 +26,7 @@ echo "========================================"
 
 python -m accelerate.commands.launch \
     --num_processes=$TRAIN_GPU_COUNT \
-    -m edit4shape.systems.trellis.entries.oreo_autograd \
+    -m oreo.systems.trellis.entries.oreo_autograd \
     --config=config/trellis_oreo.py \
     --config.eval_only=false \
     --config.run_name="$RUN_NAME"

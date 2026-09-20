@@ -49,28 +49,28 @@ from ml_collections import config_flags
 import ml_collections
 from accelerate import Accelerator
 
-from edit4shape.systems.trellis.system import (
+from oreo.systems.trellis.system import (
     build_system, trellis_forward, _CONFIG,
 )
-from edit4shape.systems.base import setup_env_and_seed, EvalModeGuard
-from edit4shape.datasets.trellis import (
+from oreo.systems.base import setup_env_and_seed, EvalModeGuard
+from oreo.datasets.trellis import (
     TrellisCameraTrainConfig,
     TrellisCameraEvalConfig,
     TrellisDataConfig,
     TrellisDataModule,
 )
-from edit4shape.generators.trellis.state import TrellisState
-from edit4shape.generators.trellis.rollout import rollout_sparse, rollout_dense
-from edit4shape.generators.trellis.rollout.flowedit import rollout_dense_flowedit
-from edit4shape.systems.trellis.forward import decode_and_render_gs, decode_and_render_mesh
-from edit4shape.systems.trellis.checkpoint import (
+from oreo.generators.trellis.state import TrellisState
+from oreo.generators.trellis.rollout import rollout_sparse, rollout_dense
+from oreo.generators.trellis.rollout.flowedit import rollout_dense_flowedit
+from oreo.systems.trellis.forward import decode_and_render_gs, decode_and_render_mesh
+from oreo.systems.trellis.checkpoint import (
     load_full_dual_checkpoint,
     validate_student_diff,
 )
-from edit4shape.guidance import create_guidance
-from edit4shape.systems.utils import composite_alpha_to_white
-from edit4shape.guidance.metric.clip import CLIPMetric
-from edit4shape.guidance.metric.dino import DINOMetric
+from oreo.guidance import create_guidance
+from oreo.systems.utils import composite_alpha_to_white
+from oreo.guidance.metric.clip import CLIPMetric
+from oreo.guidance.metric.dino import DINOMetric
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
