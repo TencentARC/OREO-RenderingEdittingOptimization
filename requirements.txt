@@ -137,7 +137,7 @@ deepspeed==0.16.4         # 大模型训练优化
 #    export CUDA_VISIBLE_DEVICES=0    # 指定GPU
 #
 # 4. 使用建议:
-#    # 推荐使用 SETUP.md 中的训练、评估和 Koala 脚本
+#    # 推荐使用 SETUP.md 中的训练和评估脚本
 #
 # 5. 已知问题:
 #    - 不要将 transformers 升级到 5.x；diffusers 0.38.0 的 Qwen prompt encoding 与其不兼容

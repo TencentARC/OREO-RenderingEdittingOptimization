@@ -9,11 +9,13 @@
 ## Quick start
 
 ```bash
-bash scripts/submit_koala.sh --train
+CUDA_VISIBLE_DEVICES=0 \
+bash scripts/single_node/main_trellis_dualstage_contrastive.sh
 ```
 
-本地单机试跑：
+多 GPU 训练：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 bash scripts/single_node/main_trellis_dualstage_contrastive.sh
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
+bash scripts/multi_node/main_trellis_dualstage_contrast.sh
 ```

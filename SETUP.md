@@ -1,14 +1,15 @@
 # OREO setup
 
-This document is the source of truth for the OREO Dual-Stage Contrastive FlowEdit environment, model assets, data preparation, and run commands.
+This document is the setup guide for the public OREO Dual-Stage Contrastive FlowEdit release. It describes a standalone Linux/CUDA environment and does not require Koala, a private S3 bucket, or internal infrastructure.
 
-## Verified environment
+## Requirements
 
-The release targets Python 3.12 and CUDA 12.4 with the following core versions:
+The verified environment uses:
 
 | Component | Version |
 | --- | --- |
 | Python | 3.12 |
+| CUDA | 12.4 |
 | PyTorch | 2.6.0+cu124 |
 | Torchvision | 0.21.0+cu124 |
 | Diffusers | 0.38.0 |
@@ -19,69 +20,101 @@ The release targets Python 3.12 and CUDA 12.4 with the following core versions:
 | Flash Attention | 2.7.3 |
 | Spconv | 2.3.8 |
 
-The complete Python dependency set is pinned in [`requirements.txt`](requirements.txt). Do not upgrade Transformers to 5.x in this environment. Flash Attention must be built after PyTorch 2.6.0+cu124 is installed.
+Use Linux with an NVIDIA GPU and a CUDA 12.4 compatible driver. The remaining Python dependencies are pinned in [`requirements.txt`](requirements.txt). Do not upgrade Transformers to 5.x in this environment. Build Flash Attention after installing the matching PyTorch wheel.
 
-## Koala setup
-
-The recommended path is the project setup script on a Koala pod. The script must be sourced so that its environment variables remain in the current shell.
-
-Prerequisites for the Koala path are `koala`, `s5cmd`, `aws`, `uv`, access to the project S3 bucket, and an `HF_TOKEN` for first-time Hugging Face downloads. `WANDB_API_KEY` is optional and is only needed for experiment logging.
+## Install the environment
 
 ```bash
-# First-time setup: install or restore the environment and download assets.
-. scripts/setup_koala.sh --download
+conda create -n oreo python=3.12 -y
+conda activate oreo
 
-# Daily setup: restore only from the pinned offline caches.
-. scripts/setup_koala.sh --fast
+pip install torch==2.6.0+cu124 torchvision==0.21.0+cu124 \
+  --index-url https://download.pytorch.org/whl/cu124
+pip install spconv-cu124==2.3.8
+pip install kaolin \
+  -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.6.0_cu124.html
 
-# Restore only the environment and Qwen Image Edit cache.
-. scripts/setup_koala.sh --fast --qwen-only
+export TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0"
+pip install --no-build-isolation flash-attn==2.7.3
+pip install git+https://github.com/NVlabs/nvdiffrast.git@v0.3.3
+pip install -r requirements.txt
 ```
 
-The `--fast` path is intentionally offline. It fails if a required immutable cache is missing instead of falling back to an older environment or contacting Hugging Face. The setup script also creates these project links when the corresponding assets are available:
-
-```text
-pretrained_weights -> /local-ssd/pretrained_weights
-dataset/alphaimages_v3 -> /local-ssd/alphaimages_v3
-```
-
-## Required model and data assets
-
-`setup_koala.sh --download` prepares the assets used by the retained training and evaluation paths:
-
-- TRELLIS-image-large weights;
-- Qwen-Image-Edit-2511 at commit `6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9`;
-- AlphaImages v3 training and test data;
-- the DINOv2 torch hub cache used by training.
-
-The setup script stores and restores these assets through the immutable cache layout configured in the script. Do not replace the pinned Qwen archive with the legacy archive.
-
-For optional local preparation, the following utilities remain available:
+Set the runtime variables before training or evaluation:
 
 ```bash
-python scripts/download/download_birefnet.py
-python scripts/download/download_dinov2.py --out pretrained_weights/dinov2-giant
+export ATTN_BACKEND=flash_attn
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export CUDA_VISIBLE_DEVICES=0
 ```
 
-RMBG-2.0 is restored by the Koala setup script when its cache is available. CLIP and DINOv3-L caches are optional evaluation assets; missing caches disable the corresponding metrics.
+Set `HF_HOME` and `TORCH_HOME` if the model caches should live outside their default locations. Set `HF_TOKEN` only when Hugging Face requires authentication for a download.
 
-## Additional evaluation datasets
+## Download model assets
 
-AlphaImages v3 is prepared by the Koala setup script. GSO and Toys4K are optional evaluation datasets:
+The retained training configuration expects TRELLIS weights at `pretrained_weights/TRELLIS-image-large` and uses the public Qwen-Image-Edit-2511 model through the Hugging Face cache.
+
+```bash
+mkdir -p pretrained_weights
+python scripts/download/download_trellis.py
+
+python - <<'PY'
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    "Qwen/Qwen-Image-Edit-2511",
+    revision="6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9",
+)
+PY
+```
+
+Download the local evaluation assets when their metrics are needed:
+
+```bash
+python scripts/download/download_clip.py
+python scripts/download/download_dinov2.py --mode hf \
+  --dest pretrained_weights/dinov2-giant
+```
+
+CLIP is used by the canonical evaluator. DINOv2 is used by training. The DINO metric uses the public DINOv3 ViT-L/16 checkpoint:
+
+```bash
+python - <<'PY'
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    "facebook/dinov3-vitl16-pretrain-lvd1689m",
+    local_dir="pretrained_weights/dinov3-vitl16-pretrain-lvd1689m/facebook/dinov3-vitl16-pretrain-lvd1689m",
+)
+PY
+```
+
+## Download datasets
+
+AlphaImages v3 is the default training and evaluation dataset:
+
+```bash
+python scripts/download/download_alphaimages_v3.py \
+  --out dataset/alphaimages_v3 \
+  --token "${HF_TOKEN:-}"
+```
+
+GSO and Toys4K are optional evaluation datasets:
 
 ```bash
 bash scripts/download/prepare_gso_dataset.sh
 bash scripts/download/prepare_toys4k_dataset.sh
 ```
 
-The dense evaluator accepts `alphaimages`, `alphaimage_train`, `gso_selected`, and `toys4k` through the DDP wrapper.
+The dense evaluator accepts `alphaimages`, `alphaimage_train`, `gso_selected`, and `toys4k` through its DDP wrapper.
 
 ## Training
 
-For a local single-node run:
+For a single GPU or a small local run:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 bash scripts/single_node/main_trellis_dualstage_contrastive.sh
+CUDA_VISIBLE_DEVICES=0 \
+bash scripts/single_node/main_trellis_dualstage_contrastive.sh
 ```
 
 For a multi-GPU run:
@@ -91,21 +124,11 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
 bash scripts/multi_node/main_trellis_dualstage_contrast.sh
 ```
 
-The launchers run `edit4shape.systems.trellis.entries.contrastive_dualstage_autograd` with `config/trellis_stage1+2_contrastive.py`. Use `RUN_NAME` and launcher arguments to override the run name or configuration values.
-
-To submit through Koala:
-
-```bash
-bash scripts/submit_koala.sh --train
-```
-
-For the first run, submit a debug pod, enter it, run the `--download` setup once, and then use `--fast` for later jobs.
+Both launchers run `edit4shape.systems.trellis.entries.contrastive_dualstage_autograd` with `config/trellis_stage1+2_contrastive.py`. Set `RUN_NAME` or pass configuration overrides to customize a run.
 
 ## Evaluation
 
 The canonical evaluator compares the pretrained teacher path with the finetuned student path using Dense FlowEdit and CLIP/DINO metrics.
-
-For the documented multi-GPU wrapper:
 
 ```bash
 bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh \
@@ -122,11 +145,9 @@ bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh \
   --config.rollout.flowedit.cfg_scale_src=-4.0
 ```
 
-The Python evaluator can also be launched directly with `accelerate` for a single GPU or a custom process layout.
+For a custom process layout, launch [`scripts/eval/eval_trellis_dense_flowedit.py`](scripts/eval/eval_trellis_dense_flowedit.py) directly with `accelerate`.
 
 ## Checkpoint export
-
-To export a checkpoint with the project helper:
 
 ```bash
 bash scripts/export/export_checkpoint.sh \
@@ -136,32 +157,20 @@ bash scripts/export/export_checkpoint.sh \
 
 The Python implementation is available at [`scripts/export/export_checkpoint.py`](scripts/export/export_checkpoint.py).
 
-## Local environment without Koala
+## Offline use
 
-For a local CUDA environment, use Python 3.12 and CUDA 12.4. Install PyTorch first, then the CUDA-dependent packages, then the pinned requirements:
-
-```bash
-conda create -n oreo python=3.12 -y
-conda activate oreo
-
-pip install torch==2.6.0+cu124 torchvision==0.21.0+cu124 \
-  --index-url https://download.pytorch.org/whl/cu124
-pip install spconv-cu124==2.3.8
-pip install kaolin \
-  -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.6.0_cu124.html
-
-export TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0"
-pip install --no-build-isolation flash-attn==2.7.3
-pip install -r requirements.txt
-```
-
-Set these variables when needed:
+After the model and dataset downloads complete, set the cache locations and enable offline mode:
 
 ```bash
-export ATTN_BACKEND=flash_attn
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export HF_HUB_OFFLINE=1       # only when all required assets are local
-export CUDA_VISIBLE_DEVICES=0
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export DIFFUSERS_OFFLINE=1
 ```
 
-The Koala setup script remains the reference implementation for CUDA extensions, cache layout, Qwen snapshot validation, and offline restoration.
+Keep the following paths available from the repository root:
+
+```text
+pretrained_weights/TRELLIS-image-large
+dataset/alphaimages_v3/train
+dataset/alphaimages_v3/test
+```
