@@ -4,7 +4,7 @@
 
 ## Setup
 
-环境、模型、数据准备、训练、评估和 checkpoint 导出说明见 [`SETUP.md`](SETUP.md)。
+环境、模型、数据准备和离线缓存说明见 [`SETUP.md`](SETUP.md)。
 
 ## Quick start
 

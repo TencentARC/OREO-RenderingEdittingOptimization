@@ -106,56 +106,7 @@ bash scripts/download/prepare_gso_dataset.sh
 bash scripts/download/prepare_toys4k_dataset.sh
 ```
 
-The dense evaluator accepts `alphaimages`, `alphaimage_train`, `gso_selected`, and `toys4k` through its DDP wrapper.
-
-## Training
-
-For a single GPU or a small local run:
-
-```bash
-CUDA_VISIBLE_DEVICES=0 \
-bash scripts/single_node/main_trellis_dualstage_contrastive.sh
-```
-
-For a multi-GPU run:
-
-```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
-bash scripts/multi_node/main_trellis_dualstage_contrast.sh
-```
-
-Both launchers run `edit4shape.systems.trellis.entries.contrastive_dualstage_autograd` with `config/trellis_stage1+2_contrastive.py`. Set `RUN_NAME` or pass configuration overrides to customize a run.
-
-## Evaluation
-
-The canonical evaluator compares the pretrained teacher path with the finetuned student path using Dense FlowEdit and CLIP/DINO metrics.
-
-```bash
-bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh \
-  /path/to/checkpoints/checkpoint_10_3157 alphaimages
-```
-
-The wrapper also accepts `alphaimage_train`, `gso_selected`, and `toys4k`. FlowEdit parameters can be passed after the dataset name:
-
-```bash
-bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh \
-  /path/to/checkpoints/checkpoint_10_3157 gso_selected \
-  --config.rollout.flowedit.n_max=12 \
-  --config.rollout.flowedit.cfg_scale_tgt=4.0 \
-  --config.rollout.flowedit.cfg_scale_src=-4.0
-```
-
-For a custom process layout, launch [`scripts/eval/eval_trellis_dense_flowedit.py`](scripts/eval/eval_trellis_dense_flowedit.py) directly with `accelerate`.
-
-## Checkpoint export
-
-```bash
-bash scripts/export/export_checkpoint.sh \
-  /path/to/checkpoint \
-  /path/to/output
-```
-
-The Python implementation is available at [`scripts/export/export_checkpoint.py`](scripts/export/export_checkpoint.py).
+The prepared datasets are consumed by the training and evaluation entry points.
 
 ## Offline use
 
