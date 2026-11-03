@@ -72,7 +72,6 @@ numpy==1.26.4             # Numerical calculation
 scipy==1.15.2             # scientific computing
 matplotlib==3.10.0        # Drawing
 pandas==2.2.3             # Data processing
-scikit-learn==1.9.1       # machine learning
 
 # === Configuration and tool management ===
 hydra-core==1.3.2         # Configuration management
