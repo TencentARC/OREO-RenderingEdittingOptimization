@@ -21,7 +21,7 @@ absl-py==2.3.1            # training script with VGGTObj Use
 # === TRELLIS dedicated 3D processing library ===
 # Note: The installation order is very important. It is recommended to install in the following order (install first torch, and then install spconv-cu124, and then install the remaining packages in this file)
 trimesh==4.6.13           # 3D Grid processing
-Pillow==10.4.0            # Image processing (refer to reasoning use)
+Pillow==12.1.1            # Image processing (refer to reasoning use)
 tqdm==4.67.1              # Progress bar (refer to reasoning use)
 open3d==0.19.0            # Python 3.12-compatible 3D data processing
 plyfile==1.1.2            # PLY File format support
@@ -43,7 +43,7 @@ git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057
 # - If you switch to torchsparse Backend training needs to be installed from source code torchsparse, and may require system packages libsparsehash-dev
 
 # === Image processing and computer vision ===
-pillow==10.4.0            # image processing
+pillow==12.1.1            # image processing
 opencv-python-headless==4.11.0.86  # computer vision
 kornia==0.8.1             # StableNormal(BiRefNet) Dynamic module dependencies
 rembg==2.0.67             # background removal
@@ -72,7 +72,7 @@ numpy==1.26.4             # Numerical calculation
 scipy==1.15.2             # scientific computing
 matplotlib==3.10.0        # Drawing
 pandas==2.2.3             # Data processing
-scikit-learn==1.6.1       # machine learning
+scikit-learn==1.9.1       # machine learning
 
 # === Configuration and tool management ===
 hydra-core==1.3.2         # Configuration management
@@ -92,7 +92,7 @@ nvidia-ml-py==12.570.86   # NVIDIA GPU Monitor
 # === API and services ===
 fastapi==0.115.11         # Web API frame
 uvicorn==0.34.0           # ASGI server
-aiohttp==3.11.13          # asynchronous HTTP client
+aiohttp==3.13.3          # asynchronous HTTP client
 requests==2.32.5          # HTTP Client (weights and data download)
 openai==2.8.1             # Gemini/OpenAI compatible VLM required by grader SDK
 
@@ -150,3 +150,4 @@ deepspeed==0.16.4         # Large model training optimization
 #
 # 6. Verify installation:
 #    python -c "import torch, flash_attn, spconv, kaolin, nvdiffrast, diff_gaussian_rasterization, pytorch_msssim; print('Core dependencies installed successfully')"
+
