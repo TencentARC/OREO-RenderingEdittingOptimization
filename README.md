@@ -33,11 +33,19 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
 bash scripts/multi_node/main_trellis_oreo.sh
 ```
 
+## Checkpoints
+
+Released weights: [`TencentARC/OREO`](https://huggingface.co/TencentARC/OREO) (`oreo_v1`, from `checkpoint_10_3157`).
+
+```bash
+hf download TencentARC/OREO --include 'oreo_v1/*' --local-dir ./checkpoints/oreo_v1
+```
+
 ## Evaluation
 
 ```bash
 bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh \
-  /path/to/checkpoints/checkpoint_10_3157 alphaimages
+  ./checkpoints/oreo_v1 alphaimages
 ```
 
 ## Citation
