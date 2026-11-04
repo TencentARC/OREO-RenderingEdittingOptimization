@@ -1,23 +1,4 @@
-"""
-StageOps abstract base class — Computational operation protocol for the training phase.
-
-Define each training phase "what to do" interface, does not contain any cleanup/Arrange/Life cycle knowledge.
-same one Ops Instances can be synchronized at/asynchronous/single stage/Reuse in multi-stage templates.
-
-This file only contains model-independent ABC and exception classes;
-specific implementation (ShapeOps / TexOps etc.) are provided by each model backend.
-
-Usage::
-
-    from oreo.systems.utils.stage_ops import StageOps
-
-    class MyOps(StageOps):
-        ...
-
-Design principles:
-  - Cleanup strategy consists of Slot(orchestration layer) determines, not by Ops decide
-  - Ops Just answer "What is the calculation of this stage itself?"
-"""
+"""StageOps abstract protocol: pre_rollout / rollout / decode_render / guidance hooks."""
 
 from __future__ import annotations
 
@@ -44,17 +25,7 @@ class StageSkipError(Exception):
 # =====================================================================
 
 class StageOps(ABC):
-    """
-    Computational operation interface for a single training stage.
-
-    Computational logic unique to the packaging stage (rollout / decode+render / VJP),
-    Does not include any knowledge of cleanup strategies, lifecycle management, or orchestration.
-
-    Subclasses only need to pay attention to "How do I calculate this at this stage?", no need to know:
-    - Am I in the last stage?
-    - mine subs/meshes Whether it is needed in subsequent stages
-    - Should I execute it synchronously or pipeline it asynchronously?
-    """
+    """Abstract compute protocol: pre_rollout / rollout / decode_render / guidance."""
 
     # ═══════════════════════════════════════════════════════
     # Configure query

@@ -1,4 +1,4 @@
-"""CLIP Image feature similarity loss."""
+"""CLIP image-feature similarity loss for rendered vs edited views."""
 import logging
 from typing import Optional
 
@@ -11,14 +11,7 @@ from .base import BaseMetric
 
 
 class CLIPMetric(BaseMetric):
-    """
-    CLIP Image feature space similarity Metric.
-
-    Use CLIP Vision Encoder Extract image-level features and calculate cosine similarity,loss = 1 - similarity.
-    Stay derivable:rendered Keep the gradient,target No gradient.
-
-    Use independent CLIP Model implementation retained FlowEdit metric.
-    """
+    """Cosine distance in CLIP vision embedding space."""
 
     name = "clip"
 

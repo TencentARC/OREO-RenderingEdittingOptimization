@@ -1,3 +1,9 @@
+"""
+Dataset geometry helpers for Trellis cameras: perspective projection, MVP, and W2C/C2W.
+
+Used by oreo.datasets.trellis when building intrinsics / extrinsics batches for rendering.
+"""
+
 import math
 import torch
 
@@ -8,6 +14,7 @@ def _normalize_fovy_to_batch(
     dtype: torch.dtype,
     device: torch.device,
 ) -> torch.Tensor:
+    """Normalize FOV-Y to a length-B tensor on the given device/dtype."""
     # will fovy unified as [B]
     if not torch.is_tensor(fovy_deg):
         fovy_t = torch.full((batch_size,), float(fovy_deg), dtype=dtype, device=device)  # [B]
@@ -28,17 +35,14 @@ def build_perspective_matrix(
     device: torch.device,
     batch_size: int,
 ) -> torch.Tensor:
-    """Constructs a batch perspective projection matrix.
-
-    parameters:
-    - fovy_deg: [] | [B]
-    - aspect: Scalar aspect ratio
-    - znear, zfar: Scalar near and far clipping planes
-    - dtype, device: Tensor types and devices
-    - batch_size: expected batch size (used to convert scalar fovy expanded to [B])
-
-    Return:
-    - proj: [B,4,4]
+    """
+    Build a batch of perspective projection matrices.
+    
+    Args:
+    - fovy_deg: [] or [B] vertical FOV in degrees
+    - aspect: scalar aspect ratio
+    - znear, zfar: near/far planes
+    Returns: [B,4,4] OpenGL-style projection.
     """
     fovy_t = _normalize_fovy_to_batch(fovy_deg, batch_size, dtype, device)  # [B]
 
@@ -61,14 +65,10 @@ def build_mvp_from_w2c(
     w2c: torch.Tensor,
     proj: torch.Tensor,
 ) -> torch.Tensor:
-    """According to w2c Constructed with projection matrix MVP.
-
-    Support two w2c Shape:
-    - [B,4,4]
-    - [B,V,4,4]
-
-    request proj The shape is [B,4,4].
-    Return with w2c same dimension mvp.
+    """
+    Build MVP from world-to-camera and projection matrices.
+    
+    Supports w2c shapes [B,4,4] or [B,V,4,4]; proj must broadcast accordingly.
     """
     if w2c.dim() == 3:
         mvp = torch.matmul(proj, w2c)  # [B,4,4]
@@ -80,9 +80,9 @@ def build_mvp_from_w2c(
 
 
 def build_w2c_from_c2w(c2w: torch.Tensor) -> torch.Tensor:
-    """from c2w Calculate w2c, support [B,4,4] or [B,V,4,4].
-
-    Note: Do not assume strict orthogonality, use matrix inversion directly.
+    """
+    Invert c2w to w2c for [B,4,4] or [B,V,4,4].
+    Uses general matrix inverse (no orthogonality assumption).
     """
     if c2w.dim() == 3:
         w2c = torch.inverse(c2w)  # [B,4,4]

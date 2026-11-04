@@ -1,31 +1,4 @@
-"""
-Pipeline parallel infrastructure — True asynchronous version.
-
-Provides general pipeline parallelism Mixin, support:
-- Background thread execution guidance forward + backward(not blocking train GPU)
-- FIFO Queue delivery AsyncGuidanceResult
-- can be arbitrary Guidance paradigm Reuse
-
-Parallel principle:
-  Train GPU (cuda:0) and Guidance GPU (cuda:2) It is independent hardware.
-  PyTorch of CUDA Released when the operation is executed GIL, so use threading.Thread
-  can make two GPU Working simultaneously:
-    - Main thread: in Train GPU Do it on rollout / decode / render / Phase 3
-    - Background thread: in Guidance GPU Do it on compute_guidance + backward
-
-Two-layer interface:
-- submit_async() / wait_and_get(): comp_rgb level proxy,
-  in guidance Side independent backward get rgb_grad,train Side use comp_rgb.backward(rgb_grad) Drive backpass.
-- has_pending() / pending_count: Queue status query.
-
-AsyncGuidanceResult:
-  storage guidance Calculated pixel-level gradient (rgb_grad) and scalar log,
-  train GPU No need to repeat guidance forward/backward.
-
-Usage:
-    class FlowEditGuidancePP(PipelineParallelMixin, FlowEditGuidance):
-        pass
-"""
+"""True-async pipeline-parallel helpers for overlapping Trellis train with FlowEdit guidance."""
 
 import logging
 import threading
@@ -50,25 +23,7 @@ T = TypeVar('T')
 
 @dataclass
 class AsyncGuidanceResult:
-    """
-    asynchronous Guidance Return results.
-
-    with GuidanceResult Different, what is stored here is the calculated rgb_grad(pixel-level gradient),
-    rather than need backward of loss tensor. used for train GPU side comp_rgb.backward(rgb_grad).
-
-    Life cycle:
-        1. submit_async() Internal:detach comp_rgb → guidance forward → backward → rgb_grad
-        2. wait_and_get(target_device) Return this object,rgb_grad Moved to target_device
-        3. Caller executes comp_rgb.backward(rgb_grad)
-
-    Attributes:
-        rgb_grad: ∂(weight*L)/∂comp_rgb, the shape is the same as comp_rgb consistent (B, V, H, W, 3)
-        loss_scalar: weighted scalar loss value(float, for logs)
-        loss_dict: Segmentation loss Dictionary(str → float, used for logs), which can be None
-        edited_imgs: Edited image (B,V,C,H,W),FlowEdit Dedicated, available for None
-        trackers: FlowEdit StateTracker list (for progress visualization), which can be None
-                  ★ internal latent remain in guidance GPU(get_progress_grid need)
-    """
+    """Async guidance handle (future / events) vs eager GuidanceResult."""
     rgb_grad: torch.Tensor                                  # (B, V, H, W, 3)
     loss_scalar: float = 0.0                                # weighted scalar loss
     loss_dict: Optional[Dict[str, float]] = None            # Segmentation loss(for logs)
@@ -112,23 +67,7 @@ class AsyncGuidanceResult:
 # =====================================================================
 
 class PipelineParallelMixin:
-    """
-    Pipeline parallelism Mixin(True asynchronous version).
-
-    inherit this Mixin The class requires:
-    1. Yes `device` properties (Guidance CUDA equipment)
-    2. Yes `compute_guidance(comp_rgb, condition_images, **kwargs)` method
-
-    Parallel mechanism:
-    - submit_async(): in the background Thread executed in guidance forward + backward, return immediately
-    - wait_and_get(): join background thread → Remove from queue AsyncGuidanceResult
-    - The main thread can be found in submit continue immediately after Train GPU work on (rollout / P3 etc.)
-
-    Thread safety:
-    - _join_prev_thread(): every time submit/wait First join previous thread,
-      guarantee Guidance GPU Serial execution to avoid memory contention
-    - Background thread exceptions are saved in _pp_error,wait_and_get thrown when
-    """
+    """Mixin that runs guidance forward+backward on a background thread without blocking the train step."""
 
     # Declare required attributes (subclasses must provide them)
     device: torch.device

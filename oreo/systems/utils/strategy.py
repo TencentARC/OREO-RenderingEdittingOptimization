@@ -1,7 +1,4 @@
-"""Training Strategy: Base Class + spconv Reasoning compatible mixin.
-
-Specific strategies (TrellisLoRAStrategy etc.) are defined in each generator of training_adpter in.
-"""
+"""Training strategy base + spconv inference-compat mixin."""
 from __future__ import annotations
 
 import shutil

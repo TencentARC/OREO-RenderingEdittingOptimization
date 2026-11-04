@@ -1,4 +1,4 @@
-"""MetricLogger - Unified Metrics Logger & Autograd Logging tool"""
+"""MetricLogger and autograd step logging helpers."""
 from accelerate import Accelerator
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -19,23 +19,7 @@ def build_autograd_step_log(
     phase3_log: Dict[str, Any] = None,
     prefix: str = "",
 ) -> Dict[str, Any]:
-    """
-    Merge three stages Autograd log, calculation loss/total.
-
-    unify sync / async / single / dual-stage Log merging logic:
-    1. merge guidance_log and phase3_log
-    2. Calculate loss/total = loss/guidance + reg_weight * loss/reg
-    3. Optional addition key prefix (such as "shape/" or "tex/")
-
-    Args:
-        guidance_log: Phase 2 Log (including loss/guidance, which may contain loss/reg)
-        reg_weight: reg loss weight coefficient
-        phase3_log: Phase 3 VJP Log (sync mode is {}, asynchronous mode may contain loss/reg)
-        prefix: key prefix, such as "shape/" or "tex/"
-
-    Returns:
-        The merged log dictionary (including loss/total)
-    """
+    """Format one autograd training step's metrics for logging."""
     merged = {**guidance_log, **(phase3_log or {})}
 
     total = merged.get("loss/guidance", 0.0)
@@ -55,31 +39,7 @@ def build_autograd_step_log(
 # =====================================================================
 
 class MetricLogger(AccumulatorMixin, DistributedMixin, CSVMixin, WandbMixin):
-    """
-    Unified metric recorder (supports distributed aggregation,CSV,Wandb).
-
-    Inherited from multiple Mixin, provides:
-    - AccumulatorMixin: Indicator accumulation (reset, accumulate, average)
-    - DistributedMixin: Distributed aggregation (reduce_sum, reduce_mean)
-    - CSVMixin: CSV Log (log_csv)
-    - WandbMixin: Wandb Log (log_metrics)
-
-    Usage mode:
-
-    1. Training mode (automatic gradient accumulation):
-        logger = MetricLogger(accelerator, logs_dir / "train.csv")
-        for batch in train_loader:
-            with accelerator.accumulate(model):
-                train_log = train_step(...)
-            logger.log_step(train_log, batch_size, global_step, epoch)
-
-    2. Evaluation mode (manual control):
-        logger = MetricLogger(accelerator, logs_dir / "eval.csv")
-        for batch in eval_loader:
-            metrics = evaluate(...)
-            logger.accumulate(metrics, batch_size)
-        logger.flush(global_step, epoch)
-    """
+    """Aggregates and writes train/eval scalars (optionally to Accelerate trackers)."""
 
     def __init__(self, accelerator: Accelerator = None, csv_path: Path = None):
         """

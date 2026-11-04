@@ -1,26 +1,26 @@
-"""TRELLIS Dual-Stage Contrastive FlowEdit training configuration — Sparse + Dense Two-stage contrastive learning.
+"""
+TRELLIS Dual-Stage Contrastive FlowEdit training configuration (Sparse + Dense).
 
-Corresponding entrance: oreo.systems.trellis.entries.oreo_autograd
+Entry: oreo.systems.trellis.entries.oreo_autograd
 
-Training process:
-  ── Sparse Stage ──
-  Pretrained Rollout (frozen) → clean z₀ (sparse)
-  → Noise → Student velocity → ẑ₀ → Render → FlowEdit → c_src / c_tgt
-  → Contrastive loss → slat_flow_model.grad
+Training pipeline:
+  Sparse Stage:
+    Pretrained Rollout (frozen) -> clean z0 (sparse)
+    -> Noise -> Student velocity -> z_hat0 -> Render -> FlowEdit -> c_src / c_tgt
+    -> Contrastive loss -> slat_flow_model.grad
 
-  ── Dense Stage(Reuse c_src / c_tgt)──
-  Dense Rollout (frozen) → clean z_s (dense)
-  → Noise → Student velocity → ẑ_s₀
-  → Teacher denoise with c_tgt / c_src → positive / negative
-  → Contrastive loss → sparse_structure_flow_model.grad
+  Dense Stage (reuses c_src / c_tgt):
+    Dense Rollout (frozen) -> clean z_s -> Noise -> Student velocity -> z_hat_s0
+    -> Teacher denoise with c_tgt / c_src -> positive / negative
+    -> Contrastive loss -> sparse_structure_flow_model.grad
 
-Configuration structure:
-    cfg.guidance              → Guidance initialize(FlowEdit Model loading)
-    cfg.train.guidance        → FlowEdit runtime parameters (prompt / cfg scale / loss weight)
-    cfg.train.noise           → Noise time step sampling configuration (Sparse + Dense share)
-    cfg.train.loss.contrastive → Contrast loss Parameters (ada, eps, dense_weight)
-    cfg.renderer              → Renderer configuration (only gs)
-    cfg.train                 → Training hyperparameters (mode, optimizer, loss, gradient_accumulation_steps)
+Config layout:
+    cfg.guidance              -> Guidance init (FlowEdit model load)
+    cfg.train.guidance        -> FlowEdit runtime (prompt / CFG / loss weight)
+    cfg.train.noise           -> Noise timestep sampling (shared Sparse+Dense)
+    cfg.train.loss.contrastive -> Contrastive params (ada, eps, dense_weight)
+    cfg.renderer              -> Renderer (gs)
+    cfg.train                 -> Optim / mode / grad accumulation
 """
 import ml_collections
 
@@ -30,7 +30,7 @@ import ml_collections
 # =====================================================================
 
 def _flowedit_init_config(g: ml_collections.ConfigDict):
-    """FlowEdit Sampling parameters (construct Pipeline read once)."""
+    """FlowEdit sampling params read once when constructing the pipeline."""
     g.flowedit = ml_collections.ConfigDict()
     g.flowedit.steps = 12       # Total time steps
     g.flowedit.n_max = 9        # actual execution at the end n_max step
@@ -41,7 +41,7 @@ def _flowedit_init_config(g: ml_collections.ConfigDict):
 
 
 def _flowedit_runtime_config():
-    """FlowEdit runtime parameters (per-call, pass in compute_guidance)."""
+    """FlowEdit per-call runtime params passed into compute_guidance."""
     cfg = ml_collections.ConfigDict()
 
     cfg.seed = 0
@@ -66,7 +66,7 @@ def _flowedit_runtime_config():
 
 
 def _adaptive_distance_config(cfg: ml_collections.ConfigDict):
-    """for train/eval Data addition adaptive_distance configuration."""
+    """Add adaptive_distance settings for train/eval camera distance."""
     cfg.data.train.adaptive_distance = ml_collections.ConfigDict()
     cfg.data.train.adaptive_distance.enabled = True
     cfg.data.train.adaptive_distance.fill_ratio = 0.9

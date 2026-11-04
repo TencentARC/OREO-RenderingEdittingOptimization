@@ -1,9 +1,7 @@
 """
-oreo.systems.base
-=======================
+Shared training-system primitives: device mapping, CFG mix, config/state bases, checkpoint I/O.
 
-Common base classes and placeholders for training systems.
-Extract common features of multiple model training codes for inheritance by different model backends/Extension.
+Inherited by Trellis OREO entries; keeps multi-backend hooks in one place.
 """
 
 # =====================================================================
@@ -37,39 +35,9 @@ from torch.cuda.amp import custom_bwd, custom_fwd
 
 def compute_guidance_device(train_device: torch.device) -> torch.device:
     """
-    Calculated based on training equipment Guidance Model equipment.
-
-    Strategy: Within each node, before N Zhang GPU Give training, after N Zhang GPU give Guidance.
-    When GPU When the number is insufficient (such as all used for training), it will automatically fall back to sharing the same device with training.
-
-    - Standalone mode: train=cuda:0-3, guidance=cuda:4-7(Required 2N card)
-    - Shared mode (automatic fallback): train=cuda:0-3, guidance=cuda:0-3(N Just get a card)
-      Suitable for three stages Autograd version,Phase 2 Memory peak = max(guidance, decode_render)
-
-    formula: guidance_device = LOCAL_WORLD_SIZE + LOCAL_RANK
-
-    Environment variable description:
-    - LOCAL_WORLD_SIZE: The number of processes on the current node (that is, the number of processes used for training within the node GPU number)
-    - LOCAL_RANK: The ranking of the current process within the node
-    - WORLD_SIZE: Total number of global processes (multi-machine time = Number of nodes * number of processes per node)
-
-    Args:
-        train_device: Equipment used for training (for type checking and fallback)
-
-    Returns:
-        torch.device: Guidance model equipment
-
-    Raises:
-        ValueError: If the training device is not CUDA
-
-    Example:
-        >>> # Standalone mode:LOCAL_WORLD_SIZE=4, LOCAL_RANK=1, 8 GPU
-        >>> guidance_device = compute_guidance_device(torch.device("cuda:1"))
-        >>> print(guidance_device)  # cuda:5
-
-        >>> # Shared mode (automatic fallback):LOCAL_WORLD_SIZE=4, LOCAL_RANK=1, 4 GPU
-        >>> guidance_device = compute_guidance_device(torch.device("cuda:1"))
-        >>> print(guidance_device)  # cuda:1(fallback to training device)
+    Map train CUDA device -> guidance device (node-local offset, fallback to shared).
+    
+    Formula: guidance = LOCAL_WORLD_SIZE + LOCAL_RANK (if in range).
     """
     if train_device.type != "cuda":
         raise ValueError(f"Training equipment must be CUDA, currently: {train_device}")
@@ -114,24 +82,7 @@ def mix_cfg(
     scale: float,
     uncond_mode: str = "detach"
 ) -> torch.Tensor:
-    """
-    Classifier-Free Guidance (CFG) Mixed functions.
-
-    CFG Is a technique that enhances the quality of condition generation in diffusion models.
-    formula: output = cond_pred + scale * (cond_pred - uncond_pred)
-
-    Args:
-        cond_pred: Conditional prediction results, shape (B,T,C) or (N,C)
-        uncond_pred: Unconditional prediction results, shape and cond_pred Same, can be None
-        scale: CFG scaling factor, usually > 1.0 to enhance the conditional effect
-        uncond_mode: Gradient processing mode
-            - "detach": Yes uncond_pred Disconnect gradient (default)
-            - "mirror": Yes cond_pred disconnect gradient
-            - "none": Keep the gradient of both
-
-    Returns:
-        The mixed prediction result has the same shape as the input
-    """
+    """Generic CFG mix: cond + scale*(cond-uncond)."""
     if uncond_pred is None:
         return cond_pred  # (B,T,C)
     if uncond_mode == "detach":
@@ -146,17 +97,7 @@ def mix_cfg(
 # =====================================================================
 
 class ModeGuard:
-    """
-    Module mode context manager.
-
-    Used to temporarily switch the module to the specified mode (train or eval), and restore the original state when exiting.
-    Supports simultaneous management of multiple modules to ensure BatchNorm,Dropout etc. Layers behave correctly in different modes.
-
-    Usage:
-        with ModeGuard(model1, model2, training=True):
-            output = model1(input)  # train mode
-        # Automatically restore the original after exiting training Status
-    """
+    """Context manager to temporarily set module train/eval."""
 
     def __init__(self, *modules: Any, training: bool = False):
         """
@@ -182,12 +123,12 @@ class ModeGuard:
 
 
 def TrainModeGuard(*modules: Any) -> ModeGuard:
-    """Training mode guard. Equivalent to ModeGuard(..., training=True)."""
+    """ModeGuard(..., training=True)."""
     return ModeGuard(*modules, training=True)
 
 
 def EvalModeGuard(*modules: Any) -> ModeGuard:
-    """Evaluation mode guard. Equivalent to ModeGuard(..., training=False)."""
+    """ModeGuard(..., training=False)."""
     return ModeGuard(*modules, training=False)
 
 
@@ -197,10 +138,7 @@ def EvalModeGuard(*modules: Any) -> ModeGuard:
 
 @dataclass
 class BaseConfig:
-    """
-    Training configuration base class, containing common configuration fields for all models.
-    subcategories (e.g. TrellisConfig) can inherit and add model specific fields.
-    """
+    """Shared training config fields across backends."""
     config_path: Optional[str] = None
     run_name: str = "run"
     logdir: str = "./logs"
@@ -240,17 +178,7 @@ class BaseConfig:
 
 @dataclass
 class BaseState:
-    """
-    State container base class for the build process.
-
-    Stores all intermediate states in the entire generation process, including:
-    - Sparse structure coordinates and features
-    - Camera parameters (for rendering)
-    - Conditional perspective (including image, path, embedding)
-    - generate/Editor's perspective cache
-
-    Subclasses can extend fields based on a specific model.
-    """
+    """Shared generation-state base."""
 
     @dataclass
     class Cameras:
@@ -340,18 +268,7 @@ class BaseState:
 # =====================================================================
 
 def setup_env_and_seed(cfg: Any) -> None:
-    """
-    Set random seeds and deterministic running environment.
-
-    To ensure experiment reproducibility, set the following random source seeds:
-    - Python random
-    - NumPy random
-    - PyTorch CPU/CUDA
-    - cuDNN deterministic mode
-
-    Args:
-        cfg: Configuration object, needs to contain cfg.seed Field
-    """
+    """Seed RNGs and optional deterministic flags."""
     seed = int(cfg.seed)
     random.seed(seed)
     np.random.seed(seed)
@@ -366,7 +283,7 @@ def setup_env_and_seed(cfg: Any) -> None:
 # =====================================================================
 
 class _TeeWriter:
-    """A wrapper that writes output to both the original stream and the log file"""
+    """Write to both original stream and a log file."""
     def __init__(self, original_stream, log_file_handle):
         self.original_stream = original_stream
         self.log_file_handle = log_file_handle
@@ -384,23 +301,7 @@ class _TeeWriter:
 
 
 def _setup_file_logging(log_file: Path, accelerator: Accelerator) -> None:
-    """
-    Initialization file log (each rank One log file each).
-
-    Logs are output to the console and local files at the same time to facilitate traceability of the training process.
-    The main process will additionally stderr Redirect to log file to catch unhandled exception traceback.
-
-    File structure:
-      logs/
-      ├── run_rank0.log   ← rank 0 of complete logging output
-      ├── run_rank1.log   ← rank 1 of complete logging output
-      ├── stderr.log      ← rank 0 of stderr(Exception traceback)
-      └── train_shape.csv
-
-    Args:
-        log_file: Log file path (used to determine the log directory, the actual file name contains rank suffix)
-        accelerator: Accelerate accelerator (used to obtain rank information)
-    """
+    """Per-rank file logging next to console."""
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
     root_logger.handlers.clear()
@@ -435,18 +336,7 @@ def _setup_file_logging(log_file: Path, accelerator: Accelerator) -> None:
 
 
 def build_run_paths(cfg: Any, accelerator: Accelerator) -> Tuple[Path, Path, Path, Path]:
-    """
-    Create the experiment run directory structure and save the configuration.
-
-    Directory structure:
-    {logdir}/{run_name}/
-    ├── config.yaml
-    ├── run_command.txt
-    ├── logs/
-    └── visualizations/
-        ├── train/
-        └── eval/
-    """
+    """Create run dirs and dump config YAML."""
     run_root = Path(cfg.logdir) / (cfg.run_name if cfg.run_name else "run")
     logs_dir = run_root / "logs"
     visuals_train_dir = run_root / "visualizations" / "train"
@@ -478,10 +368,7 @@ def build_run_paths(cfg: Any, accelerator: Accelerator) -> Tuple[Path, Path, Pat
 
 @dataclass
 class CheckpointIO:
-    """
-    Checkpoint read and write wrapper class.
-    Use Accelerate of save_state/load_state Perform distributed and secure checkpointing operations.
-    """
+    """Thin Accelerate save_state/load_state wrapper."""
 
     accelerator: Accelerator
     ckpt_dir: Path

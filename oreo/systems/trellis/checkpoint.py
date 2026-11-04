@@ -1,8 +1,7 @@
-"""Strict, import-light helpers for flat Accelerate Dual-Stage checkpoints.
+"""
+Import-light helpers for flat Accelerate Dual-Stage checkpoints (strict load + student/teacher diff checks).
 
-The file-to-model mapping here is deliberately explicit.  Accelerate numbers
-prepared models in registration order, so silently accepting a missing or
-renamed file can load only one student while leaving the other at base weights.
+File-to-model mapping is explicit (Accelerate registration order).
 """
 
 from collections.abc import Mapping
@@ -17,7 +16,7 @@ FULL_DUAL_LAYOUT = (
 
 
 def unwrap_module(model: Any) -> Any:
-    """Return the innermost model behind one or more ``.module`` wrappers."""
+    """Strip nested .module wrappers to the inner nn.Module."""
     seen = set()
     while hasattr(model, "module") and id(model) not in seen:
         seen.add(id(model))
@@ -61,12 +60,7 @@ def load_full_dual_checkpoint(
     sparse_structure_flow_model: Any,
     state_loader: Optional[Callable[[str], Mapping[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Load the two mandatory flat Accelerate model files with ``strict=True``.
-
-    Both paths are validated before either model is mutated.  ``state_loader``
-    is injectable so the mapping contract can be tested without torch or
-    safetensors; production callers use the lazily imported safetensors loader.
-    """
+    """strict=True load of both required flat Accelerate model files."""
     root = Path(checkpoint_dir)
     paths = {target: root / filename for target, filename in FULL_DUAL_LAYOUT}
     missing = [str(path) for path in paths.values() if not path.is_file()]
@@ -132,12 +126,7 @@ def validate_student_diff(
     target: str,
     threshold: float = 1e-8,
 ) -> Dict[str, Any]:
-    """Prove a complete student parameter set differs from its base/teacher.
-
-    A valid comparison requires identical, non-empty keys and shapes.  Success
-    further requires at least one parameter whose maximum absolute difference
-    is greater than ``threshold``; equality is a hard failure, not a warning.
-    """
+    """Assert student params differ from teacher/base (sanity after load)."""
     student = dict(unwrap_module(student_model).named_parameters())
     base = dict(unwrap_module(base_model).named_parameters())
     if not student or not base:

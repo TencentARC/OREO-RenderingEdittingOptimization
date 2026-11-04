@@ -1,31 +1,5 @@
 #!/usr/bin/env python3
-"""
-Prepare Toys4k Single view test data set (aligned GSO format).
-
-Source:
-    ZIP Filed by https://github.com/rehg-lab/lowshot-shapebias/tree/main/toys4k
-    Provided, the structure is toys4k_blend_files/<category>/<instance>/<instance>.blend
-
-Output:
-    512×512 RGBA PNG, with a transparent background, in the format toys4k_000.png ...
-    Camera: Elevation 30°, azimuth angle 0°,radius 2,FOV 40°(with TRELLIS consistent during training)
-
-Usage:
-    # Complete process (unzip + rendering)
-    bash scripts/download/prepare_toys4k_dataset.sh
-
-    # Only decompress, not render
-    python scripts/download/prepare_toys4k_dataset.py --extract_only
-
-    # Skip decompression when already decompressed (direct rendering)
-    python scripts/download/prepare_toys4k_dataset.py --skip_extract
-
-    # Only before rendering N (Debug)
-    python scripts/download/prepare_toys4k_dataset.py --max_objects 10
-
-    # Multiple processes in parallel (each worker call once Blender)
-    python scripts/download/prepare_toys4k_dataset.py --workers 8
-"""
+"""Prepare Toys4k single-view test set (GSO-aligned PNG layout) via Blender renders."""
 
 import argparse
 import json

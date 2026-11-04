@@ -1,16 +1,5 @@
 #!/usr/bin/env python
-"""
-will train checkpoint Export as TRELLIS Inference compatible weight directory.
-
-After export, it can be used directly for inference:
-    pipe = TrellisImageTo3DPipeline.from_pretrained("exports/my_model")
-
-Usage:
-    python scripts/export/export_checkpoint.py \
-        --checkpoint logs/.../checkpoints/checkpoint_0_100 \
-        --output exports/my_finetuned_trellis \
-        --pretrained pretrained_weights/TRELLIS-image-large
-"""
+"""Export a training Accelerate checkpoint into a TRELLIS-inference-compatible weight directory."""
 
 import argparse
 import json

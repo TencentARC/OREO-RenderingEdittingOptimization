@@ -1,15 +1,8 @@
 """
-Trellis v1 StageOps Specific implementation — single stage (SLAT Flow Model).
+Trellis v1 StageOps implementations (SLAT sparse, FlowEdit, contrastive, dense variants).
 
-ABC (StageOps) defined in oreo.systems.utils.stage_ops,
-This document provides Trellis v1 Specific implementation to make it accessible autograd_template Arrange templates.
-
-Implementation:
-  TrellisOps      — Universal single stage, based on cfg.renderer.type Distribute mesh/gs rendering
-
-Design principles:
-  - FlowEdit/Contrastive Ops Reuse TrellisOps of rollout,render and VJP infrastructure
-  - vjp_loop Manual merge reg_grads(Adapt 3-sub-step Phase 2)
+ABC lives in oreo.systems.utils.stage_ops; this file is the Trellis-specific compute chain:
+dense_sampling -> rollout -> decode_render -> guidance / contrastive.
 """
 
 from __future__ import annotations
@@ -43,20 +36,7 @@ from oreo.generators.trellis.rollout.base import (
 # =====================================================================
 
 class TrellisOps(StageOps):
-    """
-    Trellis v1 single stage Ops — SLAT Flow Model.
-
-    Calculation chain:
-      dense_sampling → rollout_sparse → decode_and_render_{mesh|gs} → guidance → VJP
-
-    Phase 2 keep 3-sub-step Video memory optimization:
-      P2a: no_grad decode → detached comp_rgb
-      P2b: guidance-only backward → rgb_grad
-      P2c: with-grad decode → backward(rgb_grad) → cond_proxy.grad(only guidance)
-
-    Phase 3 Manual merge reg_grads:
-      v_grad = guidance_grad + reg_weight * reg_grad → VJP
-    """
+    """Single-stage SLAT ops: dense_sampling -> rollout -> decode_render."""
 
     # ═══════════════════════════════════════════════════════
     # Configure query
@@ -214,27 +194,7 @@ class TrellisOps(StageOps):
 # =====================================================================
 
 class TrellisFlowEditOps(TrellisOps):
-    """
-    FlowEdit Ops:Rollout + Finetuned Single step denoising + 2D FlowEdit Guidance.
-
-    Training process:
-      1. pre_rollout()           — Dense Sampling(Reuse TrellisOps)
-      2. rollout()               — no_grad complete rollout → z₀(pretrained or student)
-      3. add_noise(z₀, t)       — random sampling t,flow matching Noise → zₜ(normalized domain)
-      4. finetune_denoise(zₜ,t) — finetuned model Single step prediction speed → ẑ₀(with gradient)
-      5. denormalize(ẑ₀)        — denormalize to decoder input space
-      6. decode_render_dict()    — decoder → rendering comp_rgb(Reuse TrellisOps)
-
-    No need VJP,proxy chain,no_sync hack, standard autograd That's it.
-
-    Gradient propagation path:
-      loss → rgb_grad → decoder(frozen, There is a calculation diagram) → ẑ₀ → finetune_denoise → θ.grad
-
-    Configuration requirements (cfg.train (below):
-      rollout_mode:  "pretrained" | "student"(P1 which model to use rollout)
-      noise.t_min:   Time step sampling lower bound (default 0.02)
-      noise.t_max:   Time step sampling upper bound (default 0.98)
-    """
+    """Rollout + finetuned one-step denoise + 2D FlowEdit guidance."""
 
     # ═══════════════════════════════════════════════════════
     # Rollout(according to cfg.train.rollout_mode Select model)
@@ -439,22 +399,7 @@ class TrellisFlowEditOps(TrellisOps):
 # =====================================================================
 
 class TrellisContrastiveOps(TrellisFlowEditOps):
-    """
-    Contrastive FlowEdit Ops: Expand P4/P5 for latent Spatial contrastive learning.
-
-    inheritance TrellisFlowEditOps of P0–P3.5(dense sampling,pretrained rollout,
-    Add noise,velocity prediction,velocity reg).
-
-    New method (P4/P5):
-      decode_render_teacher   — rendering Teacher z₀ → src tensor(mounted to state)
-      edit_views              — FlowEdit Edit src → tgt tensor(from state read src)
-      encode_conditions       — tensor→PIL→preprocess→DINOv2 encoding → c_src, c_tgt
-      predict_x0_teacher_with_cond — Teacher Single step denoising with custom condition
-      contrastive_loss        — Contrast loss(latent space)
-
-    Gradient propagation path:
-      contrastive_loss → z0_hat_norm → v_proxy → (relay) → v_student → θ.grad
-    """
+    """Extends FlowEdit ops with latent-space contrastive P4/P5."""
 
     def decode_render_teacher(self, state, system) -> None:
         """
@@ -682,13 +627,7 @@ class TrellisContrastiveOps(TrellisFlowEditOps):
 # =====================================================================
 
 class TrellisDenseOps(TrellisFlowEditOps):
-    """
-    Dense (Stage 1) Ops — sparse_structure_flow_model.
-
-    Operation dense Tensor (B, C, R, R, R) rather than SparseTensor.
-    None normalization(Stage 1 does not exist ss_normalization).
-    Not available decode_render — Reuse Sparse stage rendering result.
-    """
+    """Dense Stage-1 ops on (B,C,R,R,R) with sparse_structure_flow_model."""
 
     # ═══════════════════════════════════════════════════════
     # Configure query
@@ -826,17 +765,7 @@ class TrellisDenseOps(TrellisFlowEditOps):
 # =====================================================================
 
 class TrellisDenseContrastiveOps(TrellisDenseOps):
-    """
-    Dense Contrastive Ops: in Dense (B,C,R,R,R) latent Space for comparative learning.
-
-    Reuse Sparse stage of c_src / c_tgt(DINOv2 conditional encoding),
-    Does not render itself/Edit/Encoding.
-
-    Method source:
-      rollout / normalize / add_noise / sample_timestep / velocity → TrellisDenseOps
-      predict_x0_teacher_with_cond → This category (dense version)
-      contrastive_loss → TrellisContrastiveOps(reuse)
-    """
+    """Dense latent contrastive ops reusing Sparse c_src/c_tgt."""
 
     def predict_x0_teacher_with_cond(
         self,

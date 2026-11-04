@@ -1,4 +1,4 @@
-"""Metric Base class definition."""
+"""BaseMetric abstract interface for image / feature similarity losses."""
 from abc import ABC, abstractmethod
 from typing import Optional, Any
 
@@ -6,11 +6,7 @@ import torch
 
 
 class BaseMetric(ABC):
-    """
-    Similarity Metric Base class.
-
-    all metric Must be achieved compute Method, returns a scalar loss.
-    """
+    """All metrics implement compute() -> scalar loss."""
 
     name: str = "base"  # Subclasses must override
 

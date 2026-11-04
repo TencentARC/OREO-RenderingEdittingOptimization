@@ -1,10 +1,7 @@
 """
-Gaussian Splatting Renderer for Trellis.
+Gaussian Splatting renderer for Trellis (BaseRenderer 7-stage pipeline).
 
-Refactored version: inheritance BaseRenderer, follow 7 Staged rendering pipeline.
-
-Copyright (C) 2023, Inria
-GRAPHDECO research group, https://team.inria.fr/graphdeco
+OREO default training renderer (cfg.renderer type gs).
 """
 
 from dataclasses import dataclass
@@ -35,16 +32,7 @@ from oreo.renderers.base_renderer import (
 
 @dataclass
 class GaussianPipeConfig:
-    """
-    Gaussian Splatting Pipeline configuration
-
-    Attributes:
-        kernel_size: Rasterization kernel size
-        convert_SHs_python: Is there Python in progress SH -> RGB Convert
-        compute_cov3D_python: Is there Python Medium calculation 3D covariance
-        scale_modifier: scaling correction factor
-        debug: debug mode
-    """
+    """3DGS pipeline knobs (kernel size, etc.)."""
     kernel_size: float = 0.1
     convert_SHs_python: bool = False
     compute_cov3D_python: bool = False
@@ -54,11 +42,7 @@ class GaussianPipeConfig:
 
 @dataclass
 class GaussianCameraData(CameraData):
-    """
-    Gaussian Rendering private camera data
-
-    Expand CameraData, increase 3DGS required fields
-    """
+    """CameraData extended with 3DGS view/proj fields."""
     image_height: int = 512
     image_width: int = 512
     world_view_transform: torch.Tensor = None  # (4, 4) transposed view matrix
@@ -67,15 +51,7 @@ class GaussianCameraData(CameraData):
 
 @dataclass
 class GaussianRasterResult:
-    """
-    Gaussian Rasterized results
-
-    Attributes:
-        rendered_image: (3, H, W) render image
-        viewspace_points: (N, 3) Screen space points (used for gradients)
-        visibility_filter: (N,) visibility mask
-        radii: (N,) screen space radius
-    """
+    """Raster outputs: rendered_image (3,H,W), radii, etc."""
     rendered_image: torch.Tensor      # (3, H, W)
     viewspace_points: torch.Tensor    # (N, 3)
     visibility_filter: torch.Tensor   # (N,)
@@ -93,19 +69,7 @@ def gaussian_rasterize(
     bg_color: torch.Tensor,
     override_color: torch.Tensor = None,
 ) -> GaussianRasterResult:
-    """
-    Gaussian Splatting Rasterization core functions
-
-    Args:
-        camera_data: camera data
-        gaussian: Gaussian express
-        pipe_config: Pipeline configuration
-        bg_color: (3,) background color
-        override_color: (N, 3) Optional overlay colors
-
-    Returns:
-        GaussianRasterResult: Rasterized results
-    """
+    """Core 3DGS rasterization call."""
     # Lazy import
     from diff_gaussian_rasterization import GaussianRasterizer, GaussianRasterizationSettings
 
@@ -211,24 +175,7 @@ def gaussian_rasterize(
 # ============================================================================
 
 class GaussianRenderer(BaseRenderer):
-    """
-    3D Gaussian Splatting Renderer
-
-    inheritance BaseRenderer, realize 7 staged rendering pipeline:
-        Stage 1: prepare_inputs - Initialize background color
-        Stage 2: compute_camera_data - Calculate 3DGS Dedicated camera parameters
-        Stage 3: process_geometry - Return directly Gaussian(no preprocessing required)
-        Stage 4: rasterize_core - call diff_gaussian_rasterization
-        Stage 5: interpolate_attributes - Extract color (3DGS Interpolation completed)
-        Stage 6: post_process - SSAA Downsampling
-        Stage 7: assemble_output - Assemble RenderOutput
-
-    Usage example:
-        config = RenderConfig(resolution=512, near=0.1, far=10.0, ssaa=1)
-        renderer = GaussianRenderer(config)
-        output = renderer.render(gaussian, extrinsics, intrinsics)
-        # output.color: (512, 512, 3)
-    """
+    """3DGS BaseRenderer implementation for Trellis Gaussians."""
 
     def __init__(
         self,

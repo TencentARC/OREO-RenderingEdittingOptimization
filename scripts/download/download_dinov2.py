@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Download DINOv2 weights used by guidance metrics."""
+
 import argparse
 import os
 from pathlib import Path

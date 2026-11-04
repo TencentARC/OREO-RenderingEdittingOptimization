@@ -1,8 +1,4 @@
-"""
-Rollout Basic helper functions
-
-provide CFG General functions such as mixing and automatic device transfer.
-"""
+"""Shared rollout helpers: CFG mixing, device transfer, and velocity prediction (dense / sparse)."""
 
 from typing import Any, Optional, Tuple
 import torch
@@ -20,21 +16,9 @@ def mix_cfg_sparse(
     uncond_mode: str = "detach",
 ) -> Any:  # SparseTensor
     """
-    Based on SparseTensor of Classifier-Free Guidance (CFG) Mixed functions.
-
-    CFG formula: output = cond_pred + scale * (cond_pred - uncond_pred)
-
-    Args:
-        cond_pred: SparseTensor, conditional prediction results
-        uncond_pred: SparseTensor, the unconditional prediction result can be None
-        scale: CFG scaling factor, usually > 1.0 to enhance the conditional effect
-        uncond_mode: Gradient processing mode
-            - "detach": Yes uncond_pred Disconnect gradient (default)
-            - "mirror": Yes cond_pred disconnect gradient
-            - "none": Keep the gradient of both
-
-    Returns:
-        SparseTensor: Mixed prediction results
+    Classifier-Free Guidance mix on SparseTensor.
+    
+    CFG: output = cond_pred + scale * (cond_pred - uncond_pred) (feats-wise).
     """
     if uncond_pred is None:
         return cond_pred
@@ -58,13 +42,7 @@ def mix_cfg_sparse(
 
 
 def auto_device_sparse(model_name="slat_flow_model"):
-    """
-    Decorator: automatically SparseTensor Input goes to the model device and output goes back to the original device.
-
-    Note: When crossing devices, you must create a completely new SparseTensor, cannot be used .to() method.
-    because SparseTensor.to() Will not be transferred spatial_cache and spconv internal indice_dict,
-    These caches are still on the original device, resulting in cudaErrorIllegalAddress Error.
-    """
+    """Decorator: move SparseTensor inputs to model device and outputs back."""
     import functools
 
     def decorator(fn):
@@ -98,11 +76,7 @@ def auto_device_sparse(model_name="slat_flow_model"):
 
 
 def auto_device_dense(model_name="sparse_structure_flow_model"):
-    """
-    Decorator: automatically dense Tensor Input goes to the model device and output goes back to the original device.
-
-    with auto_device_sparse aligned, but works with normal torch.Tensor (B, C, R, R, R).
-    """
+    """Decorator: same as auto_device_sparse but for dense tensors."""
     import functools
 
     def decorator(fn):
@@ -127,7 +101,7 @@ def auto_device_dense(model_name="sparse_structure_flow_model"):
 
 @auto_device_sparse("slat_flow_model")
 def _predict_sparse_cond_velocity(pipeline, x_t, t_batch, cond_emb):
-    """Velocity Prediction (automatically adapts devices)."""
+    """Conditional sparse velocity prediction (auto device)."""
     # ★ Truncate input gradients: avoid multiple steps rollout Concatenation of gradients leads to explosion/disappear
     x_t = x_t.replace(x_t.feats.detach())  # SparseTensor(feats: (N, C), coords: (N, 4))
     return pipeline.sparse.sampling_step(x_t, t_batch, cond_emb, None, 0.0)
@@ -144,25 +118,7 @@ def predict_sparse_velocity_with_cfg(
     cfg_max: float,
     device: torch.device,
 ) -> SparseTensor:
-    """
-    Velocity field prediction + CFG Hybrid (universal version)
-
-    Note:Gradient checkpointing should be enabled at the model level (model.blocks[i].use_checkpoint = True),
-    rather than processing it in this function.
-
-    Args:
-        pipeline: model pipeline
-        x_t: Current status SparseTensor
-        t_val: time step
-        cond_emb: conditional encoding (B, S, C)
-        uncond_emb: unconditional encoding (B, S, C) or None
-        slat_guidance: CFG scale
-        cfg_min, cfg_max: CFG Application range
-        device: Run the device
-
-    Returns:
-        velocity: SparseTensor, velocity field prediction
-    """
+    """Sparse velocity + CFG mix. Enable gradient checkpointing at the model level if needed."""
     B = cond_emb.shape[0]
     t_batch = torch.full((B,), t_val, device=device, dtype=torch.float32)  # (B,)
     use_cfg = cfg_min <= t_val <= cfg_max
@@ -189,15 +145,7 @@ def prepare_embeddings(
     cond: Optional[torch.Tensor] = None,
     uncond: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-    """
-    Conditions/Unconditional code extraction + Equipment transfer.
-
-    Supports external overlays (cond/uncond Not None used directly),
-    Otherwise from state.extract_embeddings() Extract.
-
-    Returns:
-        (cond_emb, uncond_emb): have been transferred to device
-    """
+    """Extract / move cond & uncond embeddings; optional external overrides."""
     if cond is not None:
         cond_emb = cond.to(device)
         uncond_emb = uncond.to(device) if uncond is not None else None
@@ -216,7 +164,7 @@ def _expand_cond_to_batch(
     emb: torch.Tensor,
     batch_size: int,
 ) -> torch.Tensor:
-    """will (1, ...) The encoding is expanded to (B, ...). If it matches, it will be returned directly."""
+    """Expand encoding from (1,...) to (B,...); return as-is if already matched."""
     if emb.shape[0] == 1 and batch_size > 1:
         return emb.repeat(batch_size, *([1] * (emb.dim() - 1)))
     return emb
@@ -229,22 +177,7 @@ def _predict_dense_cond_velocity(
     t_val: float,
     cond_emb: torch.Tensor,
 ) -> torch.Tensor:
-    """
-    Dense Conditions velocity Forecast.
-
-    with _predict_sparse_cond_velocity Alignment:
-    - Truncate input gradients (avoid multiple steps rollout Gradient series)
-    - call pipeline.dense_sampling_step
-
-    Args:
-        pipeline: TrellisRefAdapter
-        x_t: (B, C, R, R, R)
-        t_val: time step ∈ [0, 1] (float, by _scale_timesteps in float64 Zoom down)
-        cond_emb: (B, S, C) Conditional encoding (already batch-expand)
-
-    Returns:
-        velocity: (B, C, R, R, R)
-    """
+    """Dense conditional velocity. Aligns with sparse: truncate input grads to avoid multi-step graph blow-up."""
     x_t = x_t.detach()
     return pipeline.dense.sampling_step(x_t, t_val, cond_emb, None, 0.0)
 
@@ -260,27 +193,7 @@ def predict_dense_velocity_with_cfg(
     cfg_max: float,
     device: torch.device,
 ) -> torch.Tensor:
-    """
-    Dense Velocity field prediction + CFG Mix.
-
-    with predict_sparse_velocity_with_cfg Alignment:
-    - Conditional prediction has gradient
-    - unconditional prediction no_grad + detach
-    - CFG interval control
-
-    Args:
-        pipeline: TrellisRefAdapter
-        x_t: (B, C, R, R, R)
-        t_val: time step ∈ [0, 1]
-        cond_emb: (B_cond, S, C) conditional encoding
-        uncond_emb: (B_uncond, S, C) or None
-        ss_guidance: CFG scale
-        cfg_min, cfg_max: CFG Application range
-        device: Run the device
-
-    Returns:
-        velocity: (B, C, R, R, R)
-    """
+    """Dense velocity + CFG mix (aligned with sparse API)."""
     B = x_t.shape[0]
     use_cfg = cfg_min <= t_val <= cfg_max
 

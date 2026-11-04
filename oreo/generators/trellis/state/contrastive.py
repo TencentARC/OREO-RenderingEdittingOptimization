@@ -1,14 +1,7 @@
 """
-TrellisContrastiveState - Contrastive FlowEdit Training state container
+TrellisContrastiveState — contrastive FlowEdit training state (independent of TrellisState).
 
-Stores all intermediate states in the comparison learning process and supports multiple stages (Stage 1: structure, Stage 2: SLAT):
-- StageLatent: each stage latent Status (z0 / zt / z0_pred / z0_teacher / reg_loss)
-- sparse structure coordinates (BaseState.coords)
-- Camera parameters (cameras)
-- condition information (views_conditioned): input image + DINOv2/CLIP Embed (inherited from BaseState)
-- Generate results (views_generated): Teacher z₀ rendering + DINOv2 condition
-- Edit results (views_edited): FlowEdit Edit + DINOv2 condition
-- Trackers (velocity + guidance)
+Covers Stage-1 structure and Stage-2 SLAT contrastive intermediates (c_src/c_tgt, pos/neg, ...).
 """
 
 from dataclasses import dataclass, field
@@ -22,27 +15,7 @@ from .stage_latent import StageLatent
 
 @dataclass
 class TrellisContrastiveState(BaseState):
-    """
-    Contrastive FlowEdit Training state container.
-
-    independent from TrellisState, not inherited TrellisState(Avoid field conflicts).
-    inheritance BaseState get cameras / views_conditioned / extract_embeddings.
-
-    Use StageLatent Unified management of two stages latent Status:
-        stage1: structure flow model latent — Tensor (B, 8, 16, 16, 16)
-        stage2: SLAT flow model latent — SparseTensor (N, C)
-
-    Training process mounting convention:
-        P0  → views_conditioned (attach_batch), cameras (attach_batch)
-        P1  → stage2.z0 = teacher z₀, stage2.z0_teacher = same reference
-              BaseState.coords = sparse structure coordinates (by dense sampling output)
-        P3  → z0_hat_norm remain as local variable
-        P4a → views_generated.image_tensor (rendering teacher z₀)
-        P4b → views_edited.image_tensor (FlowEdit Edit results)
-              trackers.guidance = FlowEdit middle step trackers
-        P4c → views_generated.image_condition / views_edited.image_condition (DINOv2)
-        P5  → trackers.velocity = VelocityTracker
-    """
+    """Contrastive FlowEdit state container (not a subclass of TrellisState)."""
 
     @dataclass
     class ViewsGenerated:

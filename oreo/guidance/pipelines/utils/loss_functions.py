@@ -1,15 +1,11 @@
 """
-Loss Compute function and time step sampling tools.
+Loss helpers and multi-timestep aggregation for FlowEdit / contrastive training.
 
-Design principles:
-1. single step Loss: Calculate a single (src, target) Right loss
-2. Multi-step aggregation: combine multiple loss aggregate into one
-3. LossMixin: for Tracker Provide a unified loss computing power
-4. Time step sampling: supports multi-time step sampling (MTS)
-
-Two orthogonal dimensions:
-- Normalization method:ada=False(original MSE)/ ada=True(normalized gradient)
-- Aggregation method:final / mean / weighted / inv_weighted
+Design:
+1. Single-step loss on (src, target)
+2. Multi-step reduce: final / mean / weighted / inv_weighted
+3. LossMixin on trackers
+4. Orthogonal axes: ada normalize vs reduce mode
 """
 
 from typing import List, Literal, Optional
@@ -30,18 +26,9 @@ ReduceMode = Literal["final", "mean", "weighted", "inv_weighted"]
 
 def reduce_losses(losses: List[torch.Tensor], mode: ReduceMode = "final") -> torch.Tensor:
     """
-    Polymerization multiple steps loss.
-
-    Args:
-        losses: List of scalar losses
-        mode:
-            - "final": Only take the last one
-            - "mean": uniform average
-            - "weighted": 1/k Weighted (large in the early stage)
-            - "inv_weighted": k/K Weighted (larger in the later stage)
-
-    Returns:
-        scalar loss
+    Aggregate a list of scalar step losses.
+    
+    Modes: final | mean | weighted(1/k) | inv_weighted(k/K).
     """
     if len(losses) == 0:
         raise ValueError("losses list is empty")
@@ -76,20 +63,8 @@ def normalize_grad(
     pos: torch.Tensor,
     eps: float = 1e-4,
 ) -> torch.Tensor:
-    """
-    Ada Normalization:grad / (|src - pos|.mean + eps)
-
-    Use src Arrive pos(to attract a target) L1 The mean distance is used as a normalization factor.
-
-    Args:
-        grad: [B, seq, C] gradient direction (usually neg - pos or src - target)
-        src: [B, seq, C] source latent(to be optimized)
-        pos: [B, seq, C] Positive sample (attracting target)
-        eps: numerically stable epsilon
-
-    Returns:
-        [B, seq, C] Normalized gradient
-    """
+    """Ada normalize: grad / (mean|src-pos| + eps). Uses L1 distance to the attractor as scale."""
+    # Scale by mean L1(src, pos) so step size adapts to edit magnitude.
     normalizer = torch.abs(src - pos).detach().mean(dim=(1, 2), keepdim=True) + eps  # [B, 1, 1]
     return grad / normalizer  # [B, seq, C]
 
@@ -104,18 +79,7 @@ def mse_loss_step(
     ada: bool = False,
     eps: float = 1e-4,
 ) -> torch.Tensor:
-    """
-    single step MSE Loss.
-
-    Args:
-        src: [B, seq, C] source latent(with gradient)
-        target: [B, seq, C] target latent(Also pos)
-        ada: Whether to use adaptive normalization
-        eps: ada pattern epsilon
-
-    Returns:
-        scalar loss
-    """
+    """Single-step MSE(src, target), optional ada. Shapes: [B,seq,C]."""
     if ada:
         grad = (src - target).detach().float()  # [B, seq, C]
         # MSE Scenario:target That's it pos
@@ -135,21 +99,8 @@ def contrastive_loss_step(
     ada: bool = False,
     eps: float = 1e-4,
 ) -> torch.Tensor:
-    """
-    Single step comparison Loss:MSE(src, pos) - MSE(src, neg)
-
-    let src towards pos come closer, stay away neg.
-
-    Args:
-        src: [B, seq, C] source latent(with gradient)
-        pos: [B, seq, C] Positive sample (attract)
-        neg: [B, seq, C] Negative samples (exclusion)
-        ada: Whether to use adaptive normalization
-        eps: ada pattern epsilon
-
-    Returns:
-        scalar loss
-    """
+    """Single-step contrastive: MSE(src,pos) - MSE(src,neg) — pull to pos, push from neg."""
+    # Pull src toward pos, push away from neg in latent space.
     if ada:
         grad = (neg - pos).detach().float()  # [B, seq, C] Direction:neg - pos
         grad_norm = normalize_grad(grad, src.float(), pos.detach().float(), eps)  # [B, seq, C]
@@ -178,19 +129,7 @@ def mse_loss(
     ada: bool = False,
     eps: float = 1e-4,
 ) -> torch.Tensor:
-    """
-    multiple steps MSE Loss.
-
-    Args:
-        src: [B, seq, C] source latent(with gradient)
-        targets: List[[B, seq, C]] target latent list
-        reduce: Aggregation method "final" | "mean" | "weighted" | "inv_weighted"
-        ada: Whether to use adaptive normalization
-        eps: ada pattern epsilon
-
-    Returns:
-        scalar loss
-    """
+    """Multi-step MSE with reduce_mode."""
     if len(targets) == 0:
         return torch.tensor(0.0, device=src.device, requires_grad=True)  # scalar
 
@@ -209,20 +148,7 @@ def csd_loss(
     ada: bool = False,
     eps: float = 1e-4,
 ) -> torch.Tensor:
-    """
-    multiple steps CSD Loss:MSE(src, x0_pos) - MSE(src, x0_neg)
-
-    Args:
-        src: [B, seq, C] source latent(with gradient)
-        x0_pos_list: List[[B, seq, C]] CSD Positive sample list (high CFG x0 predict, attract)
-        x0_neg_list: List[[B, seq, C]] CSD Negative sample list (low CFG x0 prediction, rejection)
-        reduce: Aggregation method "final" | "mean" | "weighted" | "inv_weighted"
-        ada: Whether to use adaptive normalization
-        eps: ada pattern epsilon
-
-    Returns:
-        scalar loss
-    """
+    """Multi-step CSD: MSE(src,x0_pos) - MSE(src,x0_neg)."""
     if len(x0_pos_list) == 0:
         return torch.tensor(0.0, device=src.device, requires_grad=True)  # scalar
 
@@ -238,19 +164,7 @@ def csd_loss(
 # =============================================================================
 
 class LossMixin:
-    """
-    Loss Calculate Mixin.
-
-    for Tracker Provide a unified loss Computing power:
-    - MSE Loss: MSE(src, x0_preds)
-    - CSD Loss: MSE(src, x0_pos) - MSE(src, x0_neg)
-    - mix Loss: mse_weight * MSE + csd_weight * CSD
-
-    Subclasses need to provide:
-    - x0_preds: List[Tensor] Forecast x0 list(MSE target,FlowEdit Zhongwei z_edit)
-    - x0_pos: List[Tensor] CSD Positive sample list (high CFG x0 predict, attract)
-    - x0_neg: List[Tensor] CSD Negative sample list (low CFG x0 prediction, rejection)
-    """
+    """Mixin exposing mse / contrastive / csd helpers on a tracker."""
 
     # Subclasses need to define these fields
     x0_preds: List[torch.Tensor]   # MSE target(FlowEdit Zhongwei z_edit)

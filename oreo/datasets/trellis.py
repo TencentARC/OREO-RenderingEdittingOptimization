@@ -1,3 +1,12 @@
+"""
+Trellis image datasets and camera configs for OREO training / evaluation.
+
+Pipeline role:
+  DataModule -> images + cameras -> Renderer / FlowEdit guidance.
+
+Also provides adaptive camera distance so the object fills a target FOV fraction.
+"""
+
 from utils3d.torch.transforms import intrinsics_from_fov_xy
 
 import glob
@@ -21,24 +30,7 @@ def compute_adaptive_distance(
     fill_ratio: float = 0.9,
     object_half_size: float = 0.5
 ) -> float:
-    """
-    According to FOV Calculate the camera distance so that the object occupies a specified proportion of the field of view.
-
-    TRELLIS in the training data mesh be normalized to [-0.5, 0.5]^3 within the range.
-
-    Args:
-        fov_deg: Field of view (degrees)
-        fill_ratio: The proportion of the object in the field of view (0.0~1.0), such as 0.9 Indicates that the object occupies 90% vision
-        object_half_size: Object half size (TRELLIS After normalization, it is 0.5)
-
-    Returns:
-        distance from camera to origin r
-
-    Formula derivation:
-        half height visible = r × tan(FOV/2)
-        object half size / half height visible = fill_ratio
-        => r = object_half_size / (fill_ratio × tan(FOV/2))
-    """
+    """Compute camera distance from FOV so the object occupies a given fill ratio of the view."""
     fov_rad = math.radians(fov_deg)
     tan_half_fov = math.tan(fov_rad / 2)
     r = object_half_size / (fill_ratio * tan_half_fov)
@@ -46,6 +38,7 @@ def compute_adaptive_distance(
 
 
 def build_trellis_intrinsics(fovy_deg: float, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    """Build Trellis-style camera intrinsics from FOV / resolution."""
     fov_tensor = torch.tensor([math.radians(fovy_deg)], device=device, dtype=dtype)  # [1]
     intrinsics = intrinsics_from_fov_xy(fov_tensor, fov_tensor)[0]  # [3,3]
     return intrinsics  # [3,3]
@@ -56,6 +49,7 @@ def intrinsics_to_projection(
     near: float = 1.0,
     far: float = 100.0,
 ) -> torch.Tensor:
+    """Convert OpenCV intrinsics to an OpenGL projection matrix."""
     fx, fy = intrinsics[0, 0], intrinsics[1, 1]  # [], []
     cx, cy = intrinsics[0, 2], intrinsics[1, 2]  # [], []
     proj = torch.zeros((4, 4), dtype=intrinsics.dtype, device=intrinsics.device)  # [4,4]
@@ -70,7 +64,7 @@ def intrinsics_to_projection(
 
 
 class BaseImageDatasetTrellis(Dataset):
-    """Trellis variant dataset (remove threestudio / default dependency)"""
+    """Trellis variant image dataset (no threestudio / default-config dependency)."""
 
     def __init__(self, cfg: "TrellisDataConfig", split: str):
         self.cfg = cfg
@@ -293,14 +287,14 @@ class BaseImageDatasetTrellis(Dataset):
 
 @dataclass
 class AdaptiveDistanceConfig:
-    """Adaptive camera distance configuration"""
+    """Adaptive camera-distance options (enabled, fill_ratio)."""
     enabled: bool = False                 # Whether to enable adaptive distance (based on FOV Calculate r)
     fill_ratio: float = 0.9               # The proportion of the object in the field of view (0.0~1.0)
 
 
 @dataclass
 class TrellisCameraTrainConfig:
-    """Camera parameter configuration during training"""
+    """Camera sampling config used during training."""
     n_view: int                           # Number of views during training
     yaw_range: List[float]                # yaw Sampling range (degree)
     pitch_range: List[float]              # pitch Sampling range (degree)
@@ -311,7 +305,7 @@ class TrellisCameraTrainConfig:
 
 @dataclass
 class TrellisCameraEvalConfig:
-    """Camera parameter configuration during evaluation (used uniformly range)"""
+    """Camera sampling config used during evaluation (fixed ranges)."""
     n_view: int                           # Number of viewing angles during evaluation
     yaw_range: List[float]                # yaw Sampling range (degree)
     pitch_range: List[float]              # pitch Sampling range (degree)
@@ -322,6 +316,7 @@ class TrellisCameraEvalConfig:
 
 @dataclass
 class TrellisDataConfig:
+    """Top-level train/eval data paths and camera configs."""
     batch_size: int = 1
     eval_batch_size: int = 1
     width: int = 512
@@ -341,6 +336,7 @@ class TrellisDataConfig:
 
 
 class TrellisDataModule:
+    """Builds train/eval datasets and DataLoaders for Trellis OREO."""
     def __init__(self, cfg: TrellisDataConfig, num_replicas: int = 1, rank: int = 0):
         self.cfg = cfg
         self.num_replicas = num_replicas

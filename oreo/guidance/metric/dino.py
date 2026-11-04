@@ -1,4 +1,4 @@
-"""DINOv2 feature similarity loss."""
+"""DINOv2 feature similarity loss for rendered vs edited views."""
 import logging
 from typing import Optional
 
@@ -11,12 +11,7 @@ from .base import BaseMetric
 
 
 class DINOMetric(BaseMetric):
-    """
-    DINOv2 feature space similarity Metric.
-
-    Use DINOv2 to extract features and calculate cosine similarity, loss = 1 - similarity.
-    Stay derivable:rendered Keep the gradient,target No gradient.
-    """
+    """Cosine similarity / distance on DINOv2 features."""
 
     name = "dino"
 

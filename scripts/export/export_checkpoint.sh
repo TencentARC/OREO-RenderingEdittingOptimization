@@ -1,14 +1,9 @@
 #!/bin/bash
-# will train checkpoint Export as TRELLIS Inference compatible weight directory
+# Export a training checkpoint to a TRELLIS-inference-compatible weight directory.
 #
 # Usage:
-#   bash scripts/export/export_checkpoint.sh <checkpoint_path> <output_path>
+#   bash scripts/export/export_checkpoint.sh <checkpoint_path> <output_path> [pretrained]
 #
-# Example:
-#   bash scripts/export/export_checkpoint.sh \
-#       logs/trellis_FlowEdit-mts_sgd_lr-1e-3/checkpoints/checkpoint_0_2296 \
-#       exports/trellis_finetuned_2296
-
 set -euo pipefail
 
 CHECKPOINT="${1:?Usage: $0 <checkpoint_path> <output_path>}"

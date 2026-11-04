@@ -1,12 +1,11 @@
 """
-FlowEdit Rollout - Differential Dual Branch Sampling
+FlowEdit rollout — differential dual-branch sampling in 3D latent space (Dense / Sparse).
 
-in 3D latent space (Dense / Sparse) run on FlowEdit Algorithm:
-- double branch CFG(src reverse / tgt forward)
-- Aligned Noise update
-- difference Euler step
+- Dual-branch CFG (src reverse / tgt forward)
+- Aligned noise updates
+- Differential Euler steps
 
-only for inference/Assessment.
+Intended for inference / evaluation (not the contrastive training path).
 """
 
 from typing import Optional, Any
@@ -40,15 +39,9 @@ def rollout_sparse_flowedit(
     generator: Optional[torch.Generator] = None,
 ) -> None:
     """
-    Sparse FlowEdit Differential Sampling (SLAT Stage 2).
-
-    core process:
-      1. Standard Euler rollout → x_src (teacher clean z₀)
-      2. FlowEdit Differential loop: double branch CFG + aligned noise → z_edit
-      3. denormalization → mount state.stage2.z0
-
-    Side Effects:
-        - state.stage2.z0: mount FlowEdit edited SparseTensor(Denormalization)
+    Sparse FlowEdit on SLAT Stage 2.
+    
+    Flow: Euler -> x_src -> dual-branch CFG + aligned noise -> z_edit -> denorm -> state.stage2.z0
     """
     pipeline = system.pipeline
     slat_steps, slat_guidance, slat_rescale_t, cfg_min, cfg_max, _ = pipeline.sparse.get_runtime_params()
@@ -96,6 +89,7 @@ def rollout_sparse_flowedit(
 
     with torch.no_grad():
         for i, t in enumerate(steps_iter):
+            # Only edit the last n_max steps (earlier steps kept as identity).
             if num_steps - i > n_max:
                 continue
 
@@ -160,17 +154,9 @@ def rollout_dense_flowedit(
     generator: Optional[torch.Generator] = None,
 ) -> None:
     """
-    Dense FlowEdit Differential Sampling (Stage 1 — sparse_structure_flow_model).
-
-    core process:
-      1. Standard Euler rollout → x_src (teacher clean z_s)
-      2. FlowEdit Differential loop: double branch CFG + aligned noise → z_edit
-      3. mount state.stage1.z0
-
-    Stage 1 None normalization,raw latent Direct operation.
-
-    Side Effects:
-        - state.stage1.z0: mount FlowEdit edited Dense Tensor (B, C, R, R, R)
+    Dense FlowEdit on Stage 1 (sparse_structure_flow_model).
+    
+    Same differential pattern as sparse, operating on dense (B,C,R,R,R) latents.
     """
     pipeline = system.pipeline
     ss_steps, ss_guidance, ss_rescale_t, ss_cfg_min, ss_cfg_max = pipeline.dense.get_runtime_params()
@@ -213,6 +199,7 @@ def rollout_dense_flowedit(
             t_pairs, desc="FlowEdit-Dense", leave=False,
             disable=not Accelerator().is_main_process
         )):
+            # Only edit the last n_max steps (earlier steps kept as identity).
             if num_steps - i > n_max:
                 continue
 

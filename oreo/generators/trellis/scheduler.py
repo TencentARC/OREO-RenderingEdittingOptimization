@@ -1,4 +1,4 @@
-"""Trellis Flow Matching Scheduler"""
+"""Trellis-specific Flow Matching scheduler (sigmas, rescale_t, index lookup)."""
 import torch
 from types import SimpleNamespace
 from typing import Optional, Union
@@ -11,10 +11,10 @@ from oreo.generators.base.rollout import sde_step_with_logprob_sparse
 
 class TrellisFlowScheduler(FlowScheduler):
     """
-    Trellis dedicated Flow Matching scheduler.
-
-    Inherited from base class set_timesteps,sigmas,index_for_timestep,
-    additionally provided SparseTensor of ODE step and SDE step method.
+    Trellis Flow Matching scheduler.
+    
+    Inherits set_timesteps / sigmas / index_for_timestep from the base class
+    and adds Trellis rescale_t behavior.
     """
 
     def step(self, noise_pred: SparseTensor, t: Union[float, torch.Tensor], latents: SparseTensor) -> SimpleNamespace:

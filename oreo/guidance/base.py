@@ -1,25 +1,12 @@
 """
-Guidance Module infrastructure.
+Guidance infrastructure: GuidanceResult, BaseGuidance, create_guidance().
 
-Provided by:
-- GuidanceResult: Unified return format
-- BaseGuidance: Abstract base class, containing shared logic
-- create_guidance(): Factory function, create retained FlowEdit Guidance
+Device policy: guidance often on train_device+offset GPU; falls back to shared device.
 
-Equipment allocation:
-- Guidance By default the model runs on training equipment + 1 of GPU on
-- For example: training in cuda:0, then Guidance in cuda:1
+True-loss mode:
+  1) format convert  2) encode latent (with grad)  3) Pipeline (no grad)  4) Tracker.loss() -> backward
 
-unified framework (true Loss mode):
-- all Guidance Subclasses follow the same compute_guidance Process:
-    1. format conversion
-    2. encode to latent(once, with gradient)
-    3. call Pipeline(no gradient)
-    4. Pass Tracker.loss() Compute true loss(can be directly backward)
-
-★ The configuration is divided into two layers (Init / Runtime):
-- Init configure(cfg.guidance): Model loading parameters, passed to __init__, shared at all stages
-- Runtime configure(cfg.stage.guidance): prompt / loss weights etc., each time compute_guidance incoming
+Config split: Init (cfg.guidance loads models) vs Runtime (prompts/weights per compute_guidance).
 """
 
 from __future__ import annotations
@@ -45,13 +32,13 @@ if TYPE_CHECKING:
 @dataclass
 class GuidanceResult:
     """
-    Guidance Calculation result (generic format).
-
+    Unified guidance output.
+    
     Attributes:
-        loss: Lord loss(can be directly backward)
-        edited_imgs: edited image (B,V,C,H,W),FlowEdit dedicated
-        loss_dict: Segmentation loss Dictionary, used for logging
-        trackers: FlowEdit List of intermediate state trackers (for multi-step supervision)
+        loss: main scalar (backward-able); None in edit()-only mode
+        edited_imgs: (B,V,C,H,W) FlowEdit images
+        loss_dict: per-term losses for logging
+        trackers: multi-step FlowEdit StateTrackers
     """
     loss: Optional[torch.Tensor] = None                                 # Lord loss(edit() mode is None)
     edited_imgs: Optional[torch.Tensor] = None                          # (B,V,C,H,W) FlowEdit dedicated
@@ -65,25 +52,9 @@ class GuidanceResult:
 
 class BaseGuidance(ABC):
     """
-    Guidance abstract base class(true Loss mode).
-
-    ★ The configuration is divided into two levels:
-    - __init__(guidance_cfg, train_device): Only load the model,guidance_cfg Contains only init parameters
-    - compute_guidance(..., guidance_cfg=...): Runtime parameters passed guidance_cfg incoming
-
-    Provide sharing functions:
-    - Device initialization
-    - Format conversion (tensor_to_pil, pils_to_tensor)
-    - Input format processing (_reshape_input)
-    - Latent encoding(encode_to_latent)
-    - unified compute_guidance template method
-
-    Subclasses require:
-    - settings loss_key class attributes
-    - initialization self.pipe(Pipeline Example)
-    - realize _run_pipeline() call pipeline
-    - realize _compute_loss() Compute true loss(via Tracker.loss())
-    - Optional override _build_result() Customized return results
+    Abstract guidance base (true-loss mode) with shared encode / reshape / compute_guidance template.
+    
+    Init loads models; runtime prompts/weights come via compute_guidance(..., guidance_cfg=...).
     """
 
     # Class attributes: used for loss_dict of key Name (can be overridden by subclasses)
@@ -396,12 +367,7 @@ def create_guidance(
     train_device: torch.device,
     use_pp: bool = False,
 ) -> BaseGuidance:
-    """Create the retained ordinary Qwen FlowEdit guidance.
-
-    use_pp selects the retained pipeline-parallel FlowEdit variant.
-    Every other type is rejected so removed experimental stacks cannot be
-    reintroduced through a compatibility branch.
-    """
+    """Factory for retained Qwen FlowEdit guidance; use_pp selects pipeline-parallel variant."""
     paradigm = guidance_cfg.type
     if paradigm != "flowedit":
         raise ValueError(

@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""
-Use snapshot Download ZhiyuanthePony/AlphaImages_v3 data set.
-
-Example:
-    python scripts/download/download_alphaimages_v3.py \
-            --out dataset/alphaimages_v3
-"""
+"""Download ZhiyuanthePony/AlphaImages_v3 via huggingface snapshot_download."""
 
 import argparse
 from pathlib import Path

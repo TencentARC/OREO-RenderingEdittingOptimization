@@ -1,44 +1,5 @@
 #!/usr/bin/env python3
-"""
-Prepare GSO (Google Scanned Objects) Test data set.
-
-Data source:
-    Roldbach/google_scanned_objects (HuggingFace)
-    - 1030 objects, each object 25 perspectives (Blender rendering,RGBA White background,512×512)
-    - Camera pose is random MVS layout (non-fixed azimuth),world-to-camera Matrix storage .npy
-
-Perspective selection strategy (alignment Zero123 Evaluation protocol):
-    Roldbach of each object 25 The viewing angles are randomly distributed, so for each target azimuth
-    Choose the perspective with the lowest score:score = |elev - target_elev| + 0.5 * |Δazim|(Unit: degree).
-    Note:Blender Default"front view"(Numpad 1) camera in -Y axis,atan2(y,x)=-90°.
-    Main reference image target:elev=30°, azim=-90°(front).
-
-Output file naming:
-    gso_{i:03d}.png              ← Main reference picture (azim ≈ 90°)
-    gso_{i:03d}_az{target}.png   ← Additional contrast angle (--extra_azims Specify, default 45 135)
-    Example:gso_000.png, gso_000_az045.png, gso_000_az135.png
-
-Function:
-1. from HuggingFace Download Roldbach/google_scanned_objects(single zip,~4.7 GB)
-2. Unzip to /data/zhiyuan_ma/data/gso_extracted/
-3. Print zip internal structure (for --inspect mode)
-4. sampling 100 objects, each selects the perspective closest to the azimuth angle of each target (RGBA → white background RGBA)
-5. Output to /data/zhiyuan_ma/data/gso_test/
-6. Create in code directory dataset/gso_test soft link
-
-Usage:
-    # 1. Check the internal structure first (without extracting pictures)
-    python scripts/download/prepare_gso_dataset.py --inspect
-
-    # 2. Full run (download + Unzip + Extraction, including default comparison perspective)
-    python scripts/download/prepare_gso_dataset.py
-
-    # 3. Already zip Skip download when
-    python scripts/download/prepare_gso_dataset.py --local_zip /data/zhiyuan_ma/data/gso/google_scanned_objects.zip
-
-    # 4. Customize additional contrast azimuth (0=side,45,135,180=back)
-    python scripts/download/prepare_gso_dataset.py --extra_azims 0 45 135 180
-"""
+"""Prepare GSO (Google Scanned Objects) single-view eval set (aligned OREO layout)."""
 
 import argparse
 import os

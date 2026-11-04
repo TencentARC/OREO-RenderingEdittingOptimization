@@ -1,30 +1,17 @@
 #!/bin/bash
-# Prepare Toys4k Single view test data set (aligned GSO format)
+# Prepare Toys4k single-view test set (GSO-aligned).
 #
-# Function:
-#   1. downloaded from toys4k_blend_files.zip medium decompression .blend File
-#   2. use Blender Batch rendering of single views (elevation angle 30°, azimuth angle 0°,512×512 RGBA)
-#   3. output toys4k_0000.png ... Arrive /data/zhiyuan_ma/data/toys4k_test/
-#   4. in dataset/toys4k_test Create soft link
+# Steps:
+#   1) Extract .blend from toys4k_blend_files.zip
+#   2) Blender batch render (elev 30deg, azim 0deg, 512x512 RGBA)
+#   3) Symlink dataset/toys4k_test
 #
 # Usage:
-#   conda activate grpo3d_trellis
 #   bash scripts/download/prepare_toys4k_dataset.sh
-#
-#   # Debugging: only before rendering 10 a
 #   bash scripts/download/prepare_toys4k_dataset.sh --max_objects 10
-#
-#   # Resume upload from breakpoint (skip rendered)
 #   bash scripts/download/prepare_toys4k_dataset.sh --resume
-#
-#   # Skip decompression if already decompressed
 #   bash scripts/download/prepare_toys4k_dataset.sh --skip_extract --resume
 #
-# Estimated time (4 workers,RTX3090 GPU):
-#   - Unzipped: approx. 5 minutes
-#   - rendering 4000 objects: approx. 2–4 hours
-#   - Total: approx. 2–5 hours
-
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

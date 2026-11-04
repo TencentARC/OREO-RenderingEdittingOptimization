@@ -1,27 +1,4 @@
-"""
-Dense FlowEdit Evaluation script.
-
-Comparing the rendering results of the two passes CLIP / DINO Similarity:
-  Teacher (pretrained): Dense ODE → decode_to_coords → Sparse ODE
-  Student (finetuned) : Dense ODE → Dense FlowEdit → decode_to_coords → Sparse ODE
-
-with universal teacher/student Evaluation script differences:
-  - student The path is in Stage 1 additional execution Dense FlowEdit
-  - FlowEdit parameters passed --config.rollout.flowedit.* Override (or use default)
-  - Not dependent on new config files, directly to existing config Inject flowedit subfield
-
-Usage (single card):
-  python scripts/eval/eval_trellis_dense_flowedit.py \
-    --config=config/trellis_oreo.py \
-    --config.checkpoint=/path/to/ckpt \
-    --config.rollout.flowedit.n_max=9 \
-    --config.rollout.flowedit.cfg_scale_tgt=3.0 \
-    --config.rollout.flowedit.cfg_scale_src=-3.0
-
-Usage (DDP Multi-card):
-  accelerate launch scripts/eval/eval_trellis_dense_flowedit.py \
-    --config=config/trellis_oreo.py ...
-"""
+"""Dense FlowEdit evaluation: compare teacher ODE vs student Dense-FlowEdit pipelines."""
 
 import csv
 import json

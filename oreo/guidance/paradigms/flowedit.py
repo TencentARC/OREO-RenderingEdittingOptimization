@@ -1,24 +1,7 @@
 """
-FlowEdit Guidance module.
+FlowEdit Guidance: load Qwen-Image-Edit on the guidance device alongside Trellis training.
 
-will Qwen-Image-Edit The model is loaded into Guidance on the device,
-with Trellis training processes coexist in the same Python process.
-
-★ Init / Runtime Separation:
-- __init__: load only Pipeline Model (heavyweight, one-off)
-- compute_guidance: Each call passes in guidance_cfg(prompt / loss weight, etc.)
-
-★ Pixel Metric full runtime Configuration:
-- The weight statement is unified in runtime config of loss fields (such as loss.ssim, loss.lpips etc.)
-- Model lazy loading: first time weight > 0 automatically created and cached, no need to init Statement
-
-dataflow (inherited from BaseGuidance, true Loss mode):
-    1. Format conversion (parent class)
-    2. encode to latent(parent class, once)
-    3. call FlowEdit Pipeline(_run_pipeline, multi-step editing)
-    4. Calculate Loss = Latent Loss + Pixel Loss(_compute_loss)
-       - Latent Loss: Pass Tracker.loss(), gradient path loss → latent → VAE → comp_rgb
-       - Pixel Loss:  Pass Metric(lazy loading), gradient path loss → metric → comp_rgb
+Init/Runtime split: __init__ loads weights; compute_guidance gets prompts / CFG / loss weights.
 """
 
 import logging
@@ -42,7 +25,7 @@ from oreo.guidance.metric import METRIC_REGISTRY, BaseMetric
 
 @dataclass
 class EditOutput:
-    """Single image editing output"""
+    """Single-image edit output container."""
     image: Image.Image                                  # edited image
     latent: torch.Tensor                                # [1, seq, C] edited latent
     tracker_tgt: Optional[StateTracker] = None          # tgt branch tracker
@@ -55,7 +38,7 @@ class EditOutput:
 
 @dataclass
 class FlowEditPipelineOutput:
-    """FlowEdit Pipeline output"""
+    """Batch FlowEdit pipeline output."""
     edited_images: List[Image.Image]                    # [N] edited image
     edited_tensor: torch.Tensor                         # [N, C, H, W] edited image tensor(for visualization)
     latent_after: torch.Tensor                          # [N, seq, C] edited latent
@@ -74,20 +57,9 @@ class FlowEditPipelineOutput:
 
 class FlowEditGuidance(BaseGuidance):
     """
-    FlowEdit Guidance(True Loss mode,Latent + Pixel Loss).
-
-    ★ Init / Runtime Separation:
-    - __init__: load only Pipeline model
-    - compute_guidance(..., guidance_cfg=...): Runtime parameters passed guidance_cfg incoming
-    - Pixel Metric All by runtime loss Weight control, for the first time weight > 0 Lazy loading
-
-    Data flow:
-        1. Format conversion (parent class)
-        2. encode to latent(parent class, once)
-        3. call FlowEdit Pipeline(_run_pipeline, pass in guidance_cfg)
-        4. Calculate Loss = Latent Loss + Pixel Loss(_compute_loss)
-           - _compute_latent_loss: Tracker.loss(),latent space MSE/CSD
-           - _compute_pixel_loss:  Metric.compute()(lazy loading), pixels/feature space SSIM/LPIPS/DINO/CLIP
+    True-loss FlowEdit (latent + pixel metrics).
+    
+    Init loads the edit model; runtime cfg drives prompts and loss aggregation.
     """
 
     loss_key = "flowedit"
@@ -486,7 +458,7 @@ class FlowEditGuidance(BaseGuidance):
 # =============================================================================
 
 class FlowEditGuidancePP(PipelineParallelMixin, FlowEditGuidance):
-    """FlowEdit Guidance + Pipeline parallelism."""
+    """FlowEditGuidance + PipelineParallelMixin."""
 
     def __init__(self, guidance_cfg, train_device: torch.device):
         super().__init__(guidance_cfg, train_device)

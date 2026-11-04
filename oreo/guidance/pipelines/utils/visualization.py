@@ -1,10 +1,4 @@
-"""
-Visualization Mixin.
-
-for Tracker Provides intermediate step visualization capabilities:
-- decode_uniform_samples: Sample evenly and decode middle step
-- get_progress_grid: generate n×n Progress Grid Chart
-"""
+"""Visualization mixin: decode uniform step samples and build progress grids."""
 
 from typing import List, Any
 import torch
@@ -12,13 +6,7 @@ from PIL import Image
 
 
 class VisualizationMixin:
-    """
-    Visualization Mixin - Provides visualization of intermediate step progress.
-
-    Requires subclass definition:
-    - x0_preds: List[torch.Tensor] Prediction list
-        - height, width: int Image size
-    """
+    """Progress visualization helpers for trackers."""
 
     # Subclasses need to define these fields
     x0_preds: List[torch.Tensor]

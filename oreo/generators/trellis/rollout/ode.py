@@ -1,8 +1,7 @@
 """
-ODE Rollout - Standard Euler sampling
+ODE Euler rollout for Trellis sparse / dense stages (inference + ReFL/DRaFT-style training).
 
-for reasoning and ReFL/DRaFT style training (optional x0/v regularization).
-Support three stages Autograd mode (via tracker parameters).
+Optional x0 / x1 / v regularization; supports three-phase Autograd via RolloutTracker.
 """
 
 from typing import Optional, Any
@@ -42,34 +41,7 @@ def rollout_sparse(
     is_training: bool = False,
     tracker: Optional[RolloutTracker] = None,
 ) -> Optional[RolloutTracker]:
-    """
-    Sparse feature denoising sampling (SLAT Stage 2).
-
-    core process: x_T (noise) → iterative denoising → x_0 (Features) → denormalization
-
-    three stages Autograd mode(tracker is not None):
-        - model reasoning in torch.no_grad() Execute next (is_training should be set to False)
-        - cond_pred Insert on proxy node(requires_grad=True)
-        - proxy → CFG → velocity → scheduler Build lightweight proxy chain
-        - reg_loss Pass proxy chain Connect to autograd Figure
-        - reg gradient pass autograd.grad Calculate in advance and deposit tracker.reg_grads
-
-    Args:
-        state: TrellisState Status object, including conditional encoding, coordinates, etc.
-        cfg: configuration object,cfg.rollout.reg.type ("none"|"x0"|"v")
-        system: system components (pipeline,renderer etc.)
-        device: Run the device
-        generator: Random number generator (for reproducibility)
-        is_training: Whether it is training mode (tracker mode should be False)
-        tracker: three stages Autograd of proxy logger. enabled on incoming proxy chain mode.
-
-    Returns:
-        tracker: If passed in tracker, returns the filled tracker; Otherwise return None.
-
-    Side Effects:
-        - state.stage2.z0: Mount the denormalized SparseTensor
-        - state.stage2.reg_loss: mount reg_loss
-    """
+    """Sparse SLAT Stage-2 denoising: x_T -> ... -> x_0 (feats) -> denorm onto state.stage2.z0."""
     pipeline = system.pipeline
     slat_steps, slat_guidance, slat_rescale_t, cfg_min, cfg_max, _ = pipeline.sparse.get_runtime_params()
 
@@ -250,24 +222,7 @@ def rollout_dense(
     device: torch.device,
     generator: Optional[torch.Generator] = None,
 ) -> None:
-    """
-    Dense Feature denoising sampling (Stage 1 — sparse_structure_flow_model).
-
-    core process: x_T (noise) → iterative denoising → x_0 (z_s)
-    Stage 1 None normalization,raw latent directly as z₀.
-
-    Only inference mode is supported (no_grad), used for contrastive Obtained during training teacher z_s.
-
-    Args:
-        state: Status object, containing conditional encoding
-        cfg: Configuration object
-        system: system components (pipeline etc.)
-        device: Run the device
-        generator: random number generator
-
-    Side Effects:
-        - state.stage1.z0: mount Dense Tensor (B, C, R, R, R)
-    """
+    """Dense Stage-1 denoising on sparse_structure_flow_model: x_T -> ... -> x_0."""
     pipeline = system.pipeline
     ss_steps, ss_guidance, ss_rescale_t, ss_cfg_min, ss_cfg_max = pipeline.dense.get_runtime_params()
 
@@ -307,21 +262,8 @@ def _compute_x0_regularization(
     t_norm: float,
     eps: float = 1e-4,
 ) -> torch.Tensor:
-    """
-    x0 regularization Loss:MSE(x0_stu, x0_tea) / t²
-
-    divide by t² make it with v Regularization is numerically equivalent.
-    Gradient can flow to history steps (via x_t accumulated calculation graph).
-
-    Args:
-        x0_student: Predicted by the student model x0 (N, C)
-        x0_teacher: Predicted by the teacher model x0 (N, C)
-        t_norm: normalized time step (0~1)
-        eps: Prevent division by zero
-
-    Returns:
-        loss: scalar
-    """
+    """x0 reg: MSE(x0_stu, x0_tea) / t^2 so scale matches v-regularization."""
+    # /t^2 keeps x0-reg on a similar scale to v-reg.
     diff = x0_student - x0_teacher.detach()  # (N, C)
     mse = (diff ** 2).mean()  # scalar
     return mse / (t_norm ** 2 + eps)  # scalar
@@ -331,19 +273,7 @@ def _compute_x1_regularization(
     x0_student: torch.Tensor,
     x0_teacher: torch.Tensor,
 ) -> torch.Tensor:
-    """
-    x1 regularization Loss:MSE(x0_stu, x0_tea), not divided by t².
-
-    with x0 The difference between regularization: remove 1/t² zoom,
-    make small t(Close to x0) will not be amplified.
-
-    Args:
-        x0_student: Predicted by the student model x0 (N, C)
-        x0_teacher: Predicted by the teacher model x0 (N, C)
-
-    Returns:
-        loss: scalar
-    """
+    """x1 reg: MSE(x0_stu, x0_tea) without /t^2."""
     diff = x0_student - x0_teacher.detach()  # (N, C)
     return (diff ** 2).mean()  # scalar
 
@@ -352,17 +282,6 @@ def _compute_v_regularization(
     v_student: torch.Tensor,
     v_teacher: torch.Tensor,
 ) -> torch.Tensor:
-    """
-    v regularization Loss:MSE(v_stu, v_tea)
-
-    Do it directly to the velocity field MSE, the gradient only flows to the model call of the current step.
-
-    Args:
-        v_student: The speed of student model predictions (N, C)
-        v_teacher: The speed of teacher model predictions (N, C)
-
-    Returns:
-        loss: scalar
-    """
+    """v reg: MSE(v_stu, v_tea); grads flow only into the student velocity head."""
     diff = v_student - v_teacher.detach()  # (N, C)
     return (diff ** 2).mean()  # scalar

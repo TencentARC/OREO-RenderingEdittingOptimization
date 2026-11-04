@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 """
-TRELLIS Training adapter.
+TRELLIS training adapter: LoRA on SparseLinear, optimizers, and train strategies.
 
-Core functions:
-- SparseLinearLora: LoRA layer implementation, only for feats path applied LoRA
-- register_sparse_linear_with_peft: will SparseLinear of LoRA Register to PEFT
-- build_optimizer_for_sparse: for slat_flow_model (Sparse Stage 2) Build optimizer
-- build_optimizer_for_dense: for sparse_structure_flow_model (Dense Stage 1) Build optimizer
-- set_slat_trainable: settings slat_flow_model Be trainable (freeze other models)
-- inject_lora_to_slat: towards slat_flow_model Inject LoRA layer
-- TrellisFullFinetuneStrategy: Trellis Full parameter fine-tuning strategy
-- TrellisLoRAStrategy: Trellis LoRA fine-tuning strategy
-- TrellisFrozenStrategy: Trellis Freeze Strategy (Inference Mode)
+Core pieces:
+- SparseLinearLora: LoRA only on feats path
+- register_sparse_linear_with_peft: register LoRA into PEFT dispatch
+- build_optimizer_for_sparse / dense: stage-wise optimizers
+- TrellisFullFinetuneStrategy / LoRA / Frozen
 """
 from __future__ import annotations
 
@@ -32,10 +27,7 @@ import torch.optim as optim
 
 
 class SparseLinearLora(nn.Module, LoraLayer):
-    """LoRA for TRELLIS SparseLinear.
-
-    Note:forward receive SparseTensor, internally only for feats impose LoRA, again replace Arrive SparseTensor.
-    """
+    """LoRA wrapper for TRELLIS SparseLinear: forward takes SparseTensor, applies LoRA on feats only, then replaces feats."""
 
     def __init__(
         self,
@@ -116,7 +108,7 @@ class SparseLinearLora(nn.Module, LoraLayer):
 
 
 def register_sparse_linear_with_peft() -> None:
-    """will SparseLinear of LoRA Injection registration into PEFT of dispatch in function."""
+    """Register SparseLinear LoRA into PEFT's dispatch table."""
     from peft.tuners.lora import layer as lora_layer_mod
 
     orig_dispatch = lora_layer_mod.dispatch_default
@@ -149,7 +141,7 @@ def _build_optimizer(
     trainable_params: list,
     opt_cfg: Any,
 ) -> Optional[optim.Optimizer]:
-    """Build the optimizer according to the configuration (internal generic implementation)."""
+    """Internal helper to build an optimizer from opt config."""
     if not trainable_params:
         return None
 
@@ -187,15 +179,7 @@ def build_optimizer_for_sparse(
     slat_model: nn.Module,
     opt_cfg: Any,
 ) -> Optional[optim.Optimizer]:
-    """for slat_flow_model (Sparse Stage 2) build optimizer.
-
-    Args:
-        slat_model: trainable SLatFlowModel
-        opt_cfg: Optimizer configuration (required type/lr/eps/weight_decay etc.)
-
-    Returns:
-        Optimizer or None(When there are no training parameters)
-    """
+    """Optimizer for slat_flow_model (Sparse Stage 2)."""
     trainable_params = [p for p in slat_model.parameters() if p.requires_grad]
     return _build_optimizer(trainable_params, opt_cfg)
 
@@ -204,15 +188,7 @@ def build_optimizer_for_dense(
     ss_model: nn.Module,
     opt_cfg: Any,
 ) -> Optional[optim.Optimizer]:
-    """for sparse_structure_flow_model (Dense Stage 1) build optimizer.
-
-    Args:
-        ss_model: trainable sparse_structure_flow_model
-        opt_cfg: Optimizer configuration (required type/lr/eps/weight_decay etc.)
-
-    Returns:
-        Optimizer or None(When there are no training parameters)
-    """
+    """Optimizer for sparse_structure_flow_model (Dense Stage 1)."""
     trainable_params = [p for p in ss_model.parameters() if p.requires_grad]
     return _build_optimizer(trainable_params, opt_cfg)
 
@@ -222,13 +198,7 @@ def build_optimizer_for_dense(
 # =====================================================================
 
 def set_slat_trainable(pipeline: Any, trainable: bool = True) -> None:
-    """
-    settings slat_flow_model trainable status.
-
-    Args:
-        pipeline: TrellisRefAdapter Example
-        trainable: True Thaw,False Freeze
-    """
+    """Toggle trainable flags on slat_flow_model."""
     slat_model = pipeline.pipe.models["slat_flow_model"]
     for p in slat_model.parameters():
         p.requires_grad = trainable
@@ -239,19 +209,7 @@ def set_slat_trainable(pipeline: Any, trainable: bool = True) -> None:
 
 
 def inject_lora_to_slat(pipeline: Any, lora_cfg: Any) -> None:
-    """
-    towards slat_flow_model Inject LoRA layer.
-
-    Note: You need to call before calling register_sparse_linear_with_peft().
-
-    Args:
-        pipeline: TrellisRefAdapter Example
-        lora_cfg: LoRA Configuration, must contain the following fields:
-            - lora_rank: LoRA rank
-            - lora_alpha: LoRA alpha
-            - target_modules: A list of target modules (e.g. ["to_q", "to_v"])
-            - lora_dropout: dropout scale (optional, default 0.0)
-    """
+    """Inject LoRA layers into slat_flow_model (call register_sparse_linear_with_peft first)."""
     from peft import LoraConfig, get_peft_model
 
     slat_model = pipeline.pipe.models["slat_flow_model"]
@@ -282,13 +240,7 @@ from oreo.systems.utils.strategy import TrainingStrategy, SpconvInferenceMixin
 
 
 class TrellisFullFinetuneStrategy(SpconvInferenceMixin, TrainingStrategy):
-    """
-    Trellis Full parameter fine-tuning strategy.
-
-    - Unfreeze all parameters
-    - Loading frozen teachers from pre-trained weights
-    - ⚠️ Force the same device:spconv Cross-device reasoning is not supported, teachers and students must be on the same GPU
-    """
+    """Full fine-tune: unfreeze all params; teacher loaded frozen from pretrained."""
 
     def __init__(
         self,
@@ -354,7 +306,7 @@ class TrellisFullFinetuneStrategy(SpconvInferenceMixin, TrainingStrategy):
 
 
 class TrellisLoRAStrategy(SpconvInferenceMixin, TrainingStrategy):
-    """Trellis LoRA Fine-tuning: Freeze base weights and only train LoRA parameters."""
+    """LoRA fine-tune: freeze base weights, train LoRA only."""
 
     def setup(self) -> None:
         trainable = sum(p.numel() for p in self._student.parameters() if p.requires_grad)
@@ -414,7 +366,7 @@ class TrellisLoRAStrategy(SpconvInferenceMixin, TrainingStrategy):
 
 
 class TrellisFrozenStrategy(TrainingStrategy):
-    """Trellis Freeze strategy (inference mode). No need SpconvInferenceMixin."""
+    """Frozen / inference strategy (no SpconvInferenceMixin required)."""
 
     def setup(self) -> None:
         for p in self._student.parameters():

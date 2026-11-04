@@ -1,15 +1,4 @@
-"""
-TrellisState - Trellis The state container for the build process
-
-Stores all intermediate states in the entire generation process, supporting:
-- sparse structure coordinates (coords)
-- multi-stage latent (stage1 / stage2)
-- Camera parameters (cameras)
-- condition information (views_conditioned)
-- Generate results (views_generated)
-- Edit results (views_edited)
-- guidance signal (guidance)
-"""
+"""TrellisState — generation-process state (coords, multi-stage latents, embeddings, renders)."""
 
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Dict, List, Optional
@@ -21,52 +10,7 @@ from .stage_latent import StageLatent
 
 @dataclass
 class TrellisState(BaseState):
-    """
-    Trellis The state container for the build process.
-
-    Stores all intermediate states in the entire generation process, including:
-    - sparse structure coordinates (coords)
-    - multi-stage latent (stage1 / stage2)
-    - Camera parameters (cameras)
-    - condition information (views_conditioned)
-    - Generate results (views_generated)
-    - Edit results (views_edited)
-    - guidance signal (guidance)
-
-    Property description:
-        coords (torch.Tensor): Sparse structure coordinates, shapes (N, 4).
-                               N for total points (batch_size * num_points).
-                               No. 0 listed as batch index, after 3 listed as (x, y, z) coordinates.
-
-        stage1 (StageLatent): Stage 1 (structure) latent container.
-        stage2 (StageLatent): Stage 2 (SLAT) latent container.
-            - z0 (SparseTensor): rollout denormalization of output latent, shape (N, C).
-            - reg_loss: rollout Output v-reg loss.
-
-        cameras (BaseState.Cameras): Camera parameter container.
-            - c2w (torch.Tensor): (B, V, 4, 4) Camera to world transformation matrix.
-            - w2c (torch.Tensor): (B, V, 4, 4) World to camera transformation matrix.
-            - intrinsics (torch.Tensor): (B, V, 3, 3) Internal parameter matrix.
-
-        views_conditioned (BaseState.ViewsConditioned): Condition information container.
-            - image_pils (List[PIL.Image]): Input conditional image list.
-            - cond_embed (torch.Tensor): (B, S, C) conditional embedding (CLIP/DINOv2).
-            - uncond_embed (torch.Tensor): (B, S, C) Unconditional embedding (used for CFG).
-
-        views_generated (TrellisState.ViewsGenerated): Generate a result container.
-            - image_tensor (torch.Tensor): (B, V, H, W, C) GS Color Rendering results
-            - normal_tensor (torch.Tensor): (B, V, H, W, C) Mesh Normal render(Hybrid use)
-
-        views_edited (TrellisState.ViewsEdited): Edit the result container (overrides the base class).
-            - color_tensor (torch.Tensor): (B, V, C, H, W) GS Color edit
-            - color_trackers: FlowEdit trackers(GS Color road)
-            - normal_tensor (torch.Tensor): (B, V, C, H, W) Mesh Normal edit(Hybrid use)
-            - normal_trackers: FlowEdit trackers(Mesh Normal road,Hybrid use)
-
-        guidance (TrellisState.Guidance): Guidance Result container.
-            - loss: Lord loss(can be directly backward)
-            - loss_dict: Segmentation loss Dictionary (for logging)
-    """
+    """Holds all intermediate tensors for one Trellis generation forward."""
 
     @dataclass
     class Guidance:

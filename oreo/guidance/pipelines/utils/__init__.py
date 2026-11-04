@@ -1,13 +1,4 @@
-"""
-Pipeline Tool module.
-
-contains:
-- base class: BaseStateTracker
-- Noise management: BaseNoiseMixin, NoiseMode
-- Loss function: mse_loss_step, contrastive_loss_step, mse_loss, csd_loss
-- Visualization: VisualizationMixin
-- VAE Mixin: DifferentiableVAEMixin
-"""
+"""Pipeline utilities: BaseStateTracker, noise mixins, loss helpers, VAE / visualization mixins."""
 
 from .base import BaseStateTracker
 from .noise_mixin import BaseNoiseMixin, NoiseMode

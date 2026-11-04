@@ -1,13 +1,8 @@
 """
-Trellis system factory — build Pipeline,Renderer,Strategy,Guidance,Optimizer.
+Trellis system factory — build Pipeline, Renderer, Strategy, Guidance, Optimizers, DataLoaders.
 
-This module only contains:
-1. _CONFIG:           absl config_flags Configuration entry
-2. build_system:      System component factory function
-3. build_dataloaders: training/Assessment DataLoader factory
-
-forward/rendering/For evaluation logic see forward.py;Three stages Autograd see phases.py;
-See you at the training entrance entries/ subdirectory.
+forward / eval live in forward.py; three-phase autograd in phases.py + autograd_template.py;
+training entry under entries/.
 """
 
 # =====================================================================
@@ -81,19 +76,7 @@ _CONFIG = config_flags.DEFINE_config_file("config", help_string="Path to the con
 
 @dataclass
 class TrellisSystem:
-    """
-    Trellis v1 System core component container.
-
-    with Trellis2System Parallel independent design:
-    - pipeline:    Shared build pipeline
-    - renderers:   Renderer dictionary, selected by preserving configuration mesh or gs
-    - guidance:    Guidance module
-    - optimizer_sparse:   Sparse optimizer(slat_flow_model)
-    - optimizer_dense: Dense optimizer(sparse_structure_flow_model), only Dual-Stage Use
-    - strategy:    training strategy (LoRA / Full / Frozen)
-    - cfg:         Runtime configuration (for StageOps Query)
-    - accelerator: Accelerate accelerator (for StageOps Query)
-    """
+    """Dataclass holding pipeline, renderers, guidance, sparse/dense optimizers, strategy, cfg, accelerator."""
 
     pipeline: Any = None
     renderers: Dict[str, Any] = field(default_factory=dict)  # "mesh"/"gs" → renderer
@@ -175,35 +158,12 @@ from oreo.systems.trellis.forward import (  # noqa: F401
 # =====================================================================
 
 def _build_pipeline(cfg: ml_collections.ConfigDict, accelerator: Accelerator):
-    """
-    build Pipeline(core build pipeline).
-
-    Pipeline Responsible for: conditional coding, structure/Feature sampling and decoding.
-
-    Args:
-        cfg: Complete configuration object
-        accelerator: Accelerate Distributed training accelerator
-
-    Returns:
-        built Pipeline Example
-    """
+    """Build the Trellis generation pipeline adapter."""
     return build_pipeline_from_reference(cfg, accelerator)
 
 
 def _build_renderer_of_type(cfg: ml_collections.ConfigDict, device: str, renderer_type: str):
-    """
-    Build a single of the specified type Renderer.
-
-    near/far from cfg.renderer.{renderer_type}.near/far Read.
-
-    Args:
-        cfg: Full configuration object (read renderer.resolution and other public parameters)
-        device: Device string, such as "cuda:0"
-        renderer_type: "mesh" or "gs"
-
-    Returns:
-        Renderer instance
-    """
+    """Build one renderer (mesh or gs) from cfg.renderer.*."""
     per_renderer = cfg.renderer[renderer_type]
     render_cfg = RenderConfig(
         resolution=cfg.renderer.resolution,
@@ -220,9 +180,7 @@ def _build_renderer_of_type(cfg: ml_collections.ConfigDict, device: str, rendere
 
 
 def _build_renderer(cfg: ml_collections.ConfigDict, device: str):
-    """
-    Backwards Compatibility: Press cfg.renderer.type Build a single Renderer.
-    """
+    """Back-compat: build the single cfg.renderer.type renderer."""
     return _build_renderer_of_type(cfg, device, cfg.renderer.type)
 
 
@@ -231,20 +189,7 @@ def _build_strategy(
     pipeline,
     accelerator: Accelerator,
 ):
-    """
-    build Strategy(Training strategy:LoRA / Full / Frozen).
-
-    Strategy Determined parameter freezing/thaw, student/How the teacher model is placed.
-    Both training and inference modes need to be called.
-
-    Args:
-        cfg: Complete configuration object
-        pipeline: Built Pipeline Example
-        accelerator: Accelerate accelerator
-
-    Returns:
-        Already setup of Strategy Example
-    """
+    """LoRA / Full / Frozen training strategy."""
     train_mode = cfg.train.mode
     train_device = accelerator.device
     teacher_device = (
@@ -274,14 +219,7 @@ def _build_training_components_sparse(
     accelerator: Accelerator,
     guidance_factory: callable,
 ):
-    """
-    build Sparse Training components:Guidance,Gradient Checkpointing,Sparse Optimizer.
-
-    if cfg.eval_only for True, return (None, None).
-
-    Returns:
-        (guidance, optimizer_sparse) tuple
-    """
+    """Guidance + grad checkpoint + sparse optimizer."""
     if cfg.eval_only:
         return None, None
 
@@ -309,14 +247,7 @@ def _build_training_components_dense(
     cfg: ml_collections.ConfigDict,
     pipeline,
 ):
-    """
-    build Dense Training component: unfreezing parameters,Gradient Checkpointing,Dense Optimizer.
-
-    only in cfg.train.dense_optimizer for True Create an optimizer, otherwise return None.
-
-    Returns:
-        optimizer_dense or None
-    """
+    """Unfreeze dense model + grad checkpoint + dense optimizer."""
     if cfg.eval_only or not cfg.train.dense_optimizer:
         return None
 
@@ -343,24 +274,7 @@ def build_system(
     accelerator: Accelerator,
     guidance_factory: callable,
 ) -> TrellisSystem:
-    """
-    Build a complete Trellis System (orchestration entry).
-
-    Call each sub-function in turn to build:
-    1. _build_pipeline   → Pipeline
-    2. _build_renderer   → Renderer(Put in renderers dict)
-    3. _build_strategy   → Strategy
-    4. _build_training_components_sparse → Guidance + Sparse Optimizer
-    5. _build_training_components_dense  → Dense Optimizer(optional)
-
-    Args:
-        cfg: Complete configuration object
-        accelerator: Accelerate Distributed training accelerator
-        guidance_factory: Guidance Factory function
-
-    Returns:
-        TrellisSystem: System instance containing all components
-    """
+    """Orchestrate full TrellisSystem construction."""
     device = str(accelerator.device)
 
     pipeline = _build_pipeline(cfg, accelerator)
@@ -389,35 +303,12 @@ def build_flowedit_system(
     accelerator: Accelerator,
     guidance_factory: callable,
 ) -> TrellisSystem:
-    """
-    build FlowEdit training system — Pretrained Rollout + Finetuned Single step denoising.
-
-    with build_system Same, but make sure:
-    - Use gs renderer(cfg.renderer.type = "gs")
-    - decoder Does not participate in optimization but retains the calculation graph
-
-    Args:
-        cfg: Complete configuration object
-        accelerator: Accelerate Distributed training accelerator
-        guidance_factory: Guidance Factory function
-
-    Returns:
-        TrellisSystem: System instance
-    """
+    """FlowEdit training system (pretrained rollout + finetuned one-step)."""
     return build_system(cfg, accelerator, guidance_factory)
 
 
 def build_dataloaders(cfg: ml_collections.ConfigDict, accelerator: Accelerator) -> Tuple[DataLoader, DataLoader]:
-    """
-    Construct training and evaluation DataLoader.
-
-    Args:
-        cfg: Configuration object
-        accelerator: Accelerate accelerator
-
-    Returns:
-        tuple: (train_loader, eval_loader)
-    """
+    """Train/eval DataLoaders from TrellisDataModule."""
     train_cam_cfg = TrellisCameraTrainConfig(
         n_view=cfg.data.train.n_view,
         yaw_range=list(cfg.data.train.yaw_range),

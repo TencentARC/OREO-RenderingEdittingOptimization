@@ -1,12 +1,7 @@
-"""Trellis Dual-Stage Contrastive FlowEdit autograd steps.
+"""
+Dual-Stage Contrastive FlowEdit autograd step templates (sparse + dense).
 
-The retained entry runs sparse and dense contrastive phases.  It reuses the
-shared velocity regularization and StageOps base without the removed
-single-stage or hybrid autograd orchestration paths.
-
-Retained functions:
-  - trellis_sparse_contrastive_step
-  - trellis_dense_contrastive_step
+Reuses velocity regularization and StageOps; sparse produces c_src/c_tgt reused by dense.
 """
 
 from __future__ import annotations
@@ -32,7 +27,7 @@ from oreo.generators.trellis.rollout.ode import (
 
 @contextlib.contextmanager
 def _disable_uncond(state, denoise_cfg: bool):
-    """temporarily vacant uncond_embed, skip uncond forward pass.True = Don't change,False = Leave blank."""
+    """Temporarily clear uncond_embed to skip uncond forward."""
     if denoise_cfg:
         yield
         return
@@ -58,29 +53,7 @@ def _phase3_5_velocity_reg(
     reg_weight: float,
     reg_type: str = "v",
 ) -> None:
-    """
-    Phase 3.5: teacher velocity Forecast + regularization backward → tracker.reg_grad.
-
-    Three regularization types are supported:
-      - "v":  MSE(v_proxy, v_teacher)
-      - "x0": MSE(x0_stu, x0_tea) / (t² + ε), single step with v reg mathematical equivalent
-      - "x1": MSE(x0_stu, x0_tea), not divided by t², small t Regularization is weaker when
-
-    After completion tracker Write in:
-      - reg_grad:     (N, C) detached regularized gradient
-      - reg_loss_val: float Scalar value (for logging)
-      - v_proxy.grad: is cleared (left to P4c guidance gradient)
-
-    Args:
-        ops: TrellisFlowEditOps Example
-        state: TrellisState
-        system: system components
-        tracker: VelocityTracker(Already setup_proxy)
-        zt_feats: (N, C) Features after adding noise,detached
-        t_val: float, normalized time step [0, 1]
-        reg_weight: Regularization weight (> 0)
-        reg_type: regularization type,"v" | "x0" | "x1"
-    """
+    """Phase 3.5: teacher velocity + reg backward -> tracker.reg_grad."""
     v_teacher = ops.predict_velocity_teacher(
         state, system, zt_feats, t_val,
     )  # (N, C), detached
@@ -122,40 +95,7 @@ def trellis_sparse_contrastive_step(
     profiler: PhaseProfiler,
     prefix: str = "",
 ) -> Dict[str, Any]:
-    """
-    Contrastive FlowEdit training steps — Latent Spatial contrastive learning.
-
-    Arrangement:
-      P0   Dense Sampling
-      P1   Pretrained Rollout (teacher, no_grad) → clean z₀
-      P2   Sample t, add noise → zₜ
-      P3   Student velocity prediction → v_student
-           VelocityTracker proxy: z0_hat_norm = zₜ - t·v_proxy
-      P3.5 (Optional) Teacher velocity reg → reg_grad
-      P4a  Decode/render Teacher z₀ → src images (PIL)
-      P4b  FlowEdit edit src → tgt images (PIL)
-      P4c  DINOv2 encode src / tgt → c_src, c_tgt
-      P5a  Re-noise ẑ₀_stu → zₜ_stu; Teacher denoise with c_tgt → ẑ₀_tea_tgt (positive)
-      P5b  Teacher denoise zₜ_stu with c_src → ẑ₀_tea_src (negative, detached)
-      P5c  contrastive_loss(z0_hat_norm, pos=ẑ₀_tea_tgt, neg=ẑ₀_tea_src)
-           loss.backward() → v_proxy.grad
-      P5d  relay: v_student.backward(v_proxy.grad + reg_grad) → θ.grad
-
-    Gradient propagation path:
-      loss → z0_hat_norm → v_proxy → (relay) → v_student → θ.grad
-      No need decode/render Computational graph of (compared to loss in normalization latent space).
-
-    Args:
-        ops: TrellisContrastiveOps Example
-        state: TrellisContrastiveState(Already attach_batch)
-        system: TrellisSystem
-        global_step: global steps
-        profiler: PhaseProfiler
-        prefix: Log/profiler prefix
-
-    Returns:
-        log dictionary
-    """
+    """Sparse contrastive FlowEdit step in latent space (rollout -> render -> FlowEdit -> contrastive)."""
     seed = int(system.cfg.seed)
     cfg = system.cfg
     device = system.accelerator.device
@@ -280,6 +220,8 @@ def trellis_sparse_contrastive_step(
 # Dense Contrastive Step — supply Dual-Stage Entrance independent call
 # =====================================================================
 
+# Dense reuses c_src/c_tgt produced by the sparse contrastive step above.
+
 def trellis_dense_contrastive_step(
     dense_ops,
     state,
@@ -288,12 +230,7 @@ def trellis_dense_contrastive_step(
     profiler: PhaseProfiler,
     prefix: str = "",
 ) -> Dict[str, Any]:
-    """
-    Dense Stage comparison learning steps (D1–D3c).
-
-    Reuse Sparse produced in stages state.stage1.z0 + c_src / c_tgt.
-    Required before calling Sparse stage completed (state necessary data).
-    """
+    """Dense contrastive step (D1-D3c) reusing Sparse-stage c_src/c_tgt."""
     log: Dict[str, Any] = {}
 
     cfg = system.cfg

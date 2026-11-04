@@ -1,7 +1,7 @@
-"""Retained Qwen-Image-Edit FlowEdit pipeline exports.
+"""
+Exports retained Qwen-Image-Edit FlowEdit pipeline + trackers.
 
-The ordinary FlowEdit pipeline uses StateTracker with random/fixed/aligned/delta
-noise modes.  Only the retained pipeline, tracker, and VAE helper are exported.
+Noise modes: random / fixed / aligned / delta via BaseNoiseMixin.
 """
 
 from oreo.guidance.pipelines.qwen_image_edit.flowedit_full import (

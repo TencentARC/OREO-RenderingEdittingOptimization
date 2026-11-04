@@ -1,15 +1,19 @@
-"""Flow Matching Scheduler base class - Minimalist version"""
+"""
+Flow Matching scheduler base — minimal interface shared by Trellis schedulers.
+
+Exposes timesteps / sigmas used by sde_step_with_logprob and ODE rollouts.
+"""
 import torch
 from typing import Optional
 
 
 class FlowScheduler:
     """
-    Flow Matching Scheduler base class, compatible with sde_step_with_logprob.
-
+    Flow Matching scheduler base, compatible with sde_step_with_logprob.
+    
     Properties:
-        timesteps: sequence of time steps, starting from 1 Arrive 0
-        sigmas: Flow Matching in sigma = t
+        timesteps: discrete time indices
+        sigmas: noise levels along the path
     """
 
     def __init__(self):

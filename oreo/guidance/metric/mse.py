@@ -1,4 +1,4 @@
-"""pixel space MSE loss."""
+"""Pixel-space MSE between rendered and target images."""
 import logging
 from typing import Optional
 
@@ -9,12 +9,7 @@ from .base import BaseMetric
 
 
 class MSEMetric(BaseMetric):
-    """
-    pixel space MSE Metric.
-
-    Directly calculate the mean square error between the rendered image and the edited image in pixel space.
-    Gradient path:loss → MSE → comp_rgb → 3D model
-    """
+    """Mean squared error in image space."""
 
     name = "mse"
 

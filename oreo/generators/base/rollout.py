@@ -1,3 +1,9 @@
+"""
+Shared SDE / flow-matching step helpers used by Trellis rollouts.
+
+Includes dense and SparseTensor variants of reverse SDE steps with optional log-prob.
+"""
+
 # Copied from https://github.com/kvablack/ddpo-pytorch/blob/main/ddpo_pytorch/diffusers_patch/ddim_with_logprob.py
 # We adapt it from flow to flow matching.
 
@@ -19,20 +25,7 @@ def sde_step_with_logprob(
     sde_type: Optional[str] = 'sde',
     return_sqrt_dt: Optional[bool] = False,
 ):
-    """
-    Predict the sample from the previous timestep by reversing the SDE. This function propagates the flow
-    process from the learned model outputs (most often the predicted velocity).
-
-    Args:
-        model_output (`torch.FloatTensor`):
-            The direct output from learned flow model.
-        timestep (`float`):
-            The current discrete timestep in the diffusion chain.
-        sample (`torch.FloatTensor`):
-            A current instance of a sample created by the diffusion process.
-        generator (`torch.Generator`, *optional*):
-            A random number generator.
-    """
+    """Reverse one SDE / flow step and optionally return log-probability of the transition."""
     # bf16 can overflow here when compute prev_sample_mean, we must convert all variable to fp32
     model_output=model_output.float()
     sample=sample.float()
@@ -106,23 +99,10 @@ def sde_step_with_logprob_sparse(
     return_sqrt_dt: bool = False,
 ):
     """
-    SparseTensor version SDE stepper for Trellis Flow Matching.
-
+    SparseTensor variant of the reverse SDE stepper for Trellis Flow Matching.
+    
     Args:
-        model_output: Velocity field prediction v,SparseTensor,feats shape (N, C)
-        timestep: current time step, scalar float
-        sample: current sample x_t,SparseTensor,feats shape (N, C)
-        noise_level: noise level
-        prev_sample: Optional, known next step sample
-        generator: random number generator
-        sde_type: 'sde' or 'cps'
-        return_sqrt_dt: Whether to return sqrt_dt
-
-    Returns:
-        prev_sample: SparseTensor
-        log_prob: Tensor (B,), each batch The logarithmic probability of
-        prev_sample_mean: SparseTensor
-        std_dev_t: Tensor
+        model_output: predicted velocity v as SparseTensor
     """
     # Use incoming sample type to avoid importing different modules SparseTensor cause isinstance Check failed
     SparseClass = sample.__class__

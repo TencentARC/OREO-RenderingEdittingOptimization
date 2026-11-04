@@ -1,22 +1,4 @@
-"""
-Metric module.
-
-Provides a unified similarity calculation interface and supports:
-- MSE: Pixel space mean square error
-- SSIM: structural similarity
-- LPIPS: perceived similarity (VGG Features)
-- DINO: DINOv2 feature similarity
-- CLIP: CLIP Image feature similarity
-
-Note:latent_csd and latent_mse by StateTracker.loss() Compute, don't register here.
-
-How to use:
-    from oreo.guidance.metric import create_metrics
-
-    metrics = create_metrics(loss_cfg, device, extra_kwargs={...})
-    for name, metric in metrics.items():
-        loss = metric.compute(rendered, target)
-"""
+"""Similarity metrics used inside FlowEdit / contrastive losses (MSE, SSIM, LPIPS, CLIP, DINO)."""
 from typing import Dict, Any
 
 import torch
@@ -45,27 +27,7 @@ def create_metrics(
     device: torch.device,
     extra_kwargs: Dict[str, Dict] = None,
 ) -> Dict[str, BaseMetric]:
-    """
-    According to loss_cfg weight creation in metrics(weight > 0 only created).
-
-    Args:
-        loss_cfg: Configuration objects, including various metric weight (such as loss_cfg.ssim, loss_cfg.lpips)
-        device: computing equipment
-        extra_kwargs: Additional parameters, format {"metric_name": {"param": value}}
-
-    Returns:
-        dict: {name: metric} Contains only weight > 0 of metrics
-
-    Example:
-        >>> metrics = create_metrics(
-        ...     loss_cfg,  # ssim=0.0, lpips=1.0, dino=0.5
-        ...     device,
-        ...     extra_kwargs={
-        ...         "dino": {"model_path": "...", "image_size": 518},
-        ...     }
-        ... )
-        >>> # Return {"lpips": LPIPSMetric(...), "dino": DINOMetric(...)}
-    """
+    """Instantiate metrics whose configured weight > 0."""
     extra_kwargs = extra_kwargs or {}
     metrics = {}
 

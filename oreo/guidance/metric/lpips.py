@@ -1,4 +1,4 @@
-"""LPIPS loss."""
+"""LPIPS perceptual loss (VGG-based feature distance)."""
 import logging
 from typing import Optional
 
@@ -9,11 +9,7 @@ from .base import BaseMetric
 
 
 class LPIPSMetric(BaseMetric):
-    """
-    LPIPS perceived similarity Metric.
-
-    Use VGG The network calculates feature distance,LPIPS The lower it is, the more similar it is.
-    """
+    """Lower LPIPS => more similar; used as a pixel-space perceptual term."""
 
     name = "lpips"
 

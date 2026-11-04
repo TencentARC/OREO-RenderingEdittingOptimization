@@ -1,17 +1,16 @@
 #!/bin/bash
-# TRELLIS Dual-Stage (Sparse + Dense) Contrastive FlowEdit Training script (multi-machine version)
+# Multi-node TRELLIS Dual-Stage (Sparse + Dense) Contrastive FlowEdit training.
 #
-# Training process:
-#   Sparse Stage: Pretrained Rollout → Noise → Student velocity → Contrastive loss
-#   Dense Stage:  Reuse Sparse of c_src/c_tgt → Dense velocity → Contrastive loss
+# Training:
+#   Sparse: Pretrained Rollout -> Noise -> Student velocity -> Contrastive loss
+#   Dense:  Reuse Sparse c_src/c_tgt -> Dense velocity -> Contrastive loss
 #
-# GPU Allocation strategy (shared mode):
-# - All N cards used simultaneously Trellis training (DDP) and Guidance (FlowEdit)
+# GPU policy (shared): all N cards for Trellis DDP + FlowEdit Guidance.
 #
-# Usage example:
-# - Default 8 Cards:CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 ./main_trellis_oreo.sh
-# - Customize:CUDA_VISIBLE_DEVICES=4,5,6,7 ./main_trellis_oreo.sh
-
+# Examples:
+# - Default 8 GPUs: CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 ./main_trellis_oreo.sh
+# - Custom: CUDA_VISIBLE_DEVICES=4,5,6,7 ./main_trellis_oreo.sh
+#
 : "${CUDA_VISIBLE_DEVICES:=0,1,2,3,4,5,6,7}"
 RUN_NAME="${RUN_NAME:-trellis_oreo}"
 : "${MASTER_PORT:=29512}"

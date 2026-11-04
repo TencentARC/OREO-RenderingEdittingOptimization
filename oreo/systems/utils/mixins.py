@@ -1,4 +1,4 @@
-"""Mixin base class - Reusable function modules"""
+"""Reusable training mixins (device moves, freeze helpers, etc.)."""
 import csv
 import torch
 from accelerate import Accelerator

@@ -1,21 +1,11 @@
-"""
-Differentiable VAE encoding Mixin.
-
-for Pipeline Differentiable VAE encode Ability.
-"""
+"""Differentiable VAE encode mixin for guidance pipelines (keeps grads into latents)."""
 
 import torch
 from diffusers.pipelines.qwenimage.pipeline_qwenimage_edit_plus import retrieve_latents
 
 
 class DifferentiableVAEMixin:
-    """
-    for Pipeline Differentiable VAE encode capable Mixin.
-
-    request Pipeline Has the following properties:
-        - self.vae: VAE model
-        - self.latent_channels: latent Number of channels
-    """
+    """Requires the host Pipeline to expose VAE encode hooks."""
 
     def _encode_vae_image_differentiable(self, image: torch.Tensor) -> torch.Tensor:
         """

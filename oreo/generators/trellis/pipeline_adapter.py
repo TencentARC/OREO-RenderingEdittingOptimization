@@ -1,17 +1,8 @@
 """
-Trellis reference pipeline Adapter (used uniformly SparseTensor).
+Adapter over the reference TrellisImageTo3DPipeline, unifying SparseTensor I/O.
 
-only depends on _reference_codes/TRELLIS down TrellisImageTo3DPipeline,
-and align oreo/systems/trellis.py Expected interface:
-- dense_sampling: generate sparse structures coords, returns the shape (T,4), externally expandable batch.
-- init_sparse_latents: Generate initial SparseTensor latent(feats shape (N,C)).
- - scheduler: provide set_timesteps/step, based on FlowEuler The formula of , the input and output are both SparseTensor.
-- sparse_sampling_step: single step prediction v(SparseTensor), support CFG.
-- prepare_image_conditions: Preprocess the image and generate cond/neg_cond.
-- backend.tokens_to_sparse: Return directly SparseTensor.
-- precompute_cache: The placeholder is returned directly.
-
-NOTE: All tensor operation lines are annotated with shape as required by the user.
+Depends on _reference_codes/TRELLIS and exposes the dense / sparse stage API
+expected by oreo.systems.trellis.
 """
 
 import os
@@ -33,14 +24,7 @@ from oreo.generators.trellis.scheduler import TrellisFlowScheduler
 
 
 def build_pipeline_from_reference(cfg: Any, accelerator: Any, device: Optional[torch.device] = None) -> Any:
-    """
-    Build reference Trellis pipeline Adapter instance.
-
-    Args:
-        cfg: Configuration object
-        accelerator: Accelerate accelerator
-        device: Optional, specify the device to load the model from. If not specified, use accelerator.device
-    """
+    """Build a TrellisRefAdapter from config + Accelerator."""
     project_root = torch.__file__  # place a place for mypy, actually reset below
     # will _reference_codes/TRELLIS Join sys.path
     project_root = sys.argv[0]  # Only occupy space to prevent static check alarms
@@ -79,11 +63,7 @@ def _scale_timesteps(
     batch_size: int,
     device: torch.device,
 ) -> torch.Tensor:
-    """
-    will [0,1] The range of time steps is scaled to what the model expects [0,1000] range.
-
-    Supports scalars float / 0-dim Tensor / (B,) Tensor Enter.
-    """
+    """Scale timesteps from [0,1] to the model's expected [0,1000] range (float / 0-dim / batched)."""
     if torch.is_tensor(timesteps):
         if timesteps.dim() == 0:
             return torch.full(
@@ -102,7 +82,7 @@ def _scale_timesteps(
 # =====================================================================
 
 class DenseStage:
-    """Stage 1 Operation:dense Tensor (B, C, R, R, R)."""
+    """Stage-1 ops on dense tensors (B, C, R, R, R)."""
 
     def __init__(self, adapter: "TrellisRefAdapter"):
         self._adapter = adapter
@@ -214,7 +194,7 @@ class DenseStage:
 # =====================================================================
 
 class SparseStage:
-    """Stage 2 Operation:SparseTensor (feats: (N, C), coords: (N, 4))."""
+    """Stage-2 ops on SparseTensor (feats (N,C), coords (N,4))."""
 
     def __init__(self, adapter: "TrellisRefAdapter"):
         self._adapter = adapter
@@ -296,12 +276,11 @@ class SparseStage:
 
 class TrellisRefAdapter:
     """
-    adapt TrellisImageTo3DPipeline, provide .dense and .sparse sub-object.
-
+    Wraps TrellisImageTo3DPipeline with .dense and .sparse sub-objects.
+    
     Usage:
-        pipeline.dense.sampling_step(...)   # Stage 1
-        pipeline.sparse.sampling_step(...)  # Stage 2
-        pipeline.prepare_image_conditions(...)  # Universal
+        pipeline.dense.sampling_step(...)
+        pipeline.sparse.sampling_step(...)
     """
 
     def __init__(self, pipe_raw: Any, FlowEulerSampler: Any):

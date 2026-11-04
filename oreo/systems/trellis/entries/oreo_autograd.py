@@ -1,20 +1,7 @@
 """
-Trellis Dual Contrastive Training entrance — Sparse + Dense dual stage latent Spatial contrastive learning.
+Trellis Dual Contrastive training entry — Sparse then Dense latent contrastive learning.
 
-Training process (two-stage serial, reducing peak video memory):
-  ── Sparse Stage → optimizer_sparse.step ──
-  Phase 0–5d: execute shared sparse contrastive phase, output c_src / c_tgt
-  → clip_grad_norm + optimizer_sparse.step + zero_grad(release sparse gradient)
-
-  ── Dense Stage → optimizer_dense.step ──
-  D1–D3c: Reuse Sparse Output state.stage1.z0 + c_src / c_tgt
-  → clip_grad_norm + optimizer_dense.step + zero_grad(release dense gradient)
-
-Peak memory = max(sparse_grad, dense_grad), rather than the sum of the two.
-
-Gradient propagation:
-  Sparse: contrastive_loss → v_proxy → v_student → slat_flow_model.grad
-  Dense:  contrastive_loss → v_proxy → v_student → sparse_structure_flow_model.grad
+Serial stages reduce peak VRAM; wires system factory, dataloaders, and autograd templates.
 """
 
 # =====================================================================
@@ -75,9 +62,7 @@ from oreo.systems.trellis.stage_ops import TrellisContrastiveOps, TrellisDenseCo
 # =====================================================================
 
 def main(argv) -> None:
-    """
-    Dual Contrastive Main entrance to training.
-    """
+    """CLI / absl main for Dual Contrastive training."""
     del argv
     cfg = _CONFIG.value
 

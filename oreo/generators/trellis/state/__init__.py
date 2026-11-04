@@ -1,8 +1,4 @@
-"""
-Trellis State module
-
-provide TrellisState / TrellisContrastiveState / StageLatent State container class.
-"""
+"""Trellis state containers: TrellisState, TrellisContrastiveState, StageLatent."""
 
 from .stage_latent import StageLatent
 from .base import TrellisState

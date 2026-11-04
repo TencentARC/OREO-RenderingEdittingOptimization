@@ -1,9 +1,4 @@
-"""
-Noise management Mixin.
-
-contains BaseNoiseMixin, supports ordinary Qwen FlowEdit required random / fixed /
-aligned / delta mode.
-"""
+"""Noise-mode mixin for FlowEdit: random / fixed / aligned / delta."""
 
 from typing import Optional, Literal
 import torch
@@ -26,21 +21,7 @@ NoiseMode = Literal[
 # =============================================================================
 
 class BaseNoiseMixin:
-    """
-    Noise management base class.
-
-    Supported noise modes:
-    - random: Random sampling at each step
-    - fixed: Fixed noise (unchanged after initialization)
-    - aligned: DNAEdit style cumulative compensation ε -= (v_cond - v_uncond) * (1 - t)
-    - delta: Dual branch differential compensation ε -= v_delta * dt,update() Need to be passed in v_delta
-
-    How to use:
-        @dataclass
-        class MyTracker(BaseStateTracker, BaseNoiseMixin):
-            _noise: Optional[torch.Tensor] = None
-            _mode: NoiseMode = "fixed"
-    """
+    """Controls how edit noise is sampled or reused across steps."""
 
     # Subclasses need to define these fields
     _noise: Optional[torch.Tensor]

@@ -1,22 +1,8 @@
 """
-RolloutTracker: three stages Autograd architectural cond-level proxy logger.
+RolloutTracker / VelocityTracker: cond-level proxies for three-phase autograd.
 
-Phase 1 Write track + Calculate in advance reg gradient,Phase 2 backward padding guidance .grad,Phase 3 Combine consumption.
-
-proxy built in cond_pred on (CFG before),CFG mixed in proxy Proceed afterwards.
-
-reg gradient in Phase 1 Pass torch.autograd.grad Calculate it in advance and deposit it reg_grads(Pure data, no pictures),
-with Phase 2 of guidance backward Completely decoupled. Even if Phase 2 OOM,reg Gradient is still available.
-
-data flow:
-  Phase 1  → write input_trajectory / output_trajectory / timesteps
-             + Calculate reg_loss → autograd.grad → reg_grads(Pure data, stored tracker)
-             + reg_loss_val(scalar, for logging)
-  Phase 2a → slat(Contains proxy chain) → decoder → renderer → comp_rgb
-  Phase 2  → comp_rgb.backward(rgb_grad)
-             → padding output_trajectory[t].grad(only guidance Gradient, including CFG factor)
-  Phase 3  → v_grad = guidance_grad + reg_weight * reg_grad
-             → Recalculate only cond f_θ and instant VJP backward(No need uncond/CFG/reg)
+Phase 1 writes trajectory + precomputes reg grads; Phase 2 fills guidance .grad;
+Phase 3 VJP consumes both. No intermediate slat_proxy — decode_render grads flow via tracker.
 """
 
 from dataclasses import dataclass, field
@@ -27,32 +13,7 @@ import torch
 
 @dataclass
 class RolloutTracker:
-    """
-    Rollout in process proxy logger — Phase Self-contained data transfer carrier between.
-
-    None slat_proxy Middle layer:decode/render direct connection strap proxy chain of slat,
-    guidance backward along renderer → decoder → slat → scheduler → CFG → cond_proxy.grad.
-
-    Attributes:
-        input_trajectory:  T × (N, C)
-            every step x_t.feats.detach().clone()
-            Phase 3 Recalculate f_θ Input snapshot at time.
-        output_trajectory: T × (N, C)
-            every step cond_pred.feats.detach().clone().requires_grad_(True)
-            ★ Conditions velocity proxy(not CFG later velocity).
-            proxy built in cond_pred Up,CFG mixed in proxy After that,
-            Phase 2 guidance backward along CFG chain Backpass → .grad Contains CFG scaling factor.
-            Phase 3 merge reg_grads do later VJP, no need uncond / CFG mix / reg Calculate.
-        timesteps: T × float
-            Precision in every step t_val(0~1 range,float64 accuracy).
-            Phase 3 Read directly without rebuilding scheduler.
-        reg_grads: T × (N, C) or empty list
-            Phase 1 Pass autograd.grad(reg_loss, proxies) calculated in advance reg gradient.
-            pure data (detach), does not rely on any calculation graph,Phase 2 OOM Not affected either.
-            Phase 3 merge: v_grad = guidance_grad + reg_weight * reg_grad.
-        reg_loss_val: float
-            reg loss Scalar value used for logging.
-    """
+    """Inter-phase carrier: stores timesteps, input/output trajectories, and reg grads for Phase 3 VJP."""
 
     # Phase 1 Write:rollout input for each step/Output snapshot + time step
     input_trajectory: List[torch.Tensor] = field(default_factory=list)
@@ -124,22 +85,7 @@ class RolloutTracker:
 
 @dataclass
 class VelocityTracker:
-    """
-    FlowEdit single step denoising velocity proxy logger.
-
-    in velocity Space creation proxy leaf, track separately guidance and reg(KL) gradient.
-    Log key with RolloutTracker.collect_log Consistent:
-      loss/reg, grad_norm/guidance, grad_norm/reg, grad_norm/ratio
-
-    data flow:
-      P3   → predict_velocity_student → v_student (Yes autograd Picture arrived θ)
-             setup_proxy(v_student) → v_proxy = v_student.detach().requires_grad_(True)
-      P3.5 → (Optional) predict_velocity_teacher → v_teacher (detached)
-             reg_loss = mse(v_proxy, v_teacher) → backward → v_proxy.grad = reg_grad
-             save reg_grad, clear v_proxy.grad
-      P4c  → comp_rgb.backward(rgb_grad) → v_proxy.grad = guidance_grad
-      P5   → relay_and_backward: v_student.backward(v_proxy.grad + reg_grad) → θ.grad
-    """
+    """Per-step velocity proxy for FlowEdit denoise: separate leaf for guidance vs reg grads."""
 
     # P3 write
     v_student: Optional[torch.Tensor] = None     # (N,C), Yes autograd Picture arrived θ

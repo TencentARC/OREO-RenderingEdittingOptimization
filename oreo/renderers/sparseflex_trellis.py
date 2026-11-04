@@ -1,8 +1,4 @@
-"""
-Trellis Mesh Renderer using nvdiffrast.
-
-Refactored version: inheritance BaseRenderer, follow 7 Staged rendering pipeline.
-"""
+"""Trellis mesh renderer via nvdiffrast (BaseRenderer 7-stage pipeline)."""
 
 from dataclasses import dataclass
 from typing import Any, Dict, List
@@ -21,15 +17,7 @@ from oreo.renderers.base_renderer import (
 
 @dataclass
 class MeshRasterData:
-    """
-    Mesh Rasterize intermediate data
-
-    Attributes:
-        vertices_clip: (1, V, 4) clip space vertex
-        vertices_cam: (1, V, 4) camera space vertex
-        faces: (F, 3) face index
-        mesh: original mesh (MeshExtractResult)
-    """
+    """Clip-space vertices and mesh raster intermediates."""
     vertices_clip: torch.Tensor  # (1, V, 4)
     vertices_cam: torch.Tensor   # (1, V, 4)
     faces: torch.Tensor          # (F, 3)
@@ -37,25 +25,7 @@ class MeshRasterData:
 
 
 class TrellisMeshRasterizer(BaseRenderer):
-    """
-    Trellis dedicated Mesh rasterizer (nvdiffrast)
-
-    inheritance BaseRenderer, realize 7 staged rendering pipeline:
-        Stage 1: prepare_inputs - check empty mesh
-        Stage 2: compute_camera_data - Calculate MVP matrix
-        Stage 3: process_geometry - vertices transformed to clip/camera space
-        Stage 4: rasterize_core - nvdiffrast rasterization
-        Stage 5: interpolate_attributes - interpolation depth/normal/color
-        Stage 6: post_process - SSAA Downsampling
-        Stage 7: assemble_output - Assemble RenderOutput
-
-    Usage example:
-        config = RenderConfig(resolution=512, near=0.01, far=100.0, ssaa=2)
-        renderer = TrellisMeshRasterizer(config)
-        output = renderer.render(mesh, extrinsics, intrinsics)
-        # output.depth: (512, 512)
-        # output.normal: (512, 512, 3)
-    """
+    """nvdiffrast mesh rasterizer for Trellis decoded meshes."""
 
     def __init__(self, config: RenderConfig = None, device: str = "cuda"):
         """

@@ -1,14 +1,13 @@
 #!/bin/bash
-# TRELLIS Dual-Stage (Sparse + Dense) Contrastive FlowEdit Training script (stand-alone version)
+# Single-node TRELLIS Dual-Stage (Sparse + Dense) Contrastive FlowEdit training.
 #
-# GPU Allocation strategy (shared mode):
-# - All N cards used simultaneously Trellis training (DDP) and Guidance (FlowEdit)
+# GPU policy (shared mode):
+# - All N visible GPUs run Trellis training (DDP) and FlowEdit Guidance together.
 #
-# Usage example:
-# - Single card training:export CUDA_VISIBLE_DEVICES=0
-# - 2Card training:export CUDA_VISIBLE_DEVICES=0,1
-
-# Calculate the number of training cards
+# Examples:
+# - 1 GPU:  export CUDA_VISIBLE_DEVICES=0
+# - 2 GPUs: export CUDA_VISIBLE_DEVICES=0,1
+#
 : "${CUDA_VISIBLE_DEVICES:=0}"
 export CUDA_VISIBLE_DEVICES
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True

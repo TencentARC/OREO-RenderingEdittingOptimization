@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""
-Download CLIP Model and processor to the project root directory pretrained_weights/clip/clip-vit-large-patch14
-Convenient for offline loading through local paths (model_id with processor_id pointing to the same directory):
-  - clip_model_id      -> pretrained_weights/clip/clip-vit-large-patch14
-  - clip_processor_id  -> pretrained_weights/clip/clip-vit-large-patch14
-"""
+"""Download CLIP model + processor into the project pretrained_weights tree."""
 
 import sys
 import argparse

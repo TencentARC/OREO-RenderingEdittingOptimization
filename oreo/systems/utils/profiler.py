@@ -1,42 +1,4 @@
-"""
-PhaseProfiler — Based on CUDA Event of Phase Level timer.
-
-Used to measure each training step Phase of GPU Time-consuming, assisting asynchronous pipeline optimization decisions.
-
-How to use (synchronous version):
-    profiler = PhaseProfiler(enabled=True)
-
-    profiler.tick("P1_rollout")
-    ...  # Phase 1
-    profiler.tick("P2a_decode_render")
-    ...  # Phase 2a
-    profiler.tick("P2_guidance")
-    ...  # Phase 2 (guidance + backward)
-    profiler.tick("P3_grad_backward")
-    ...  # Phase 3
-    profiler.tick("end")
-
-    timings = profiler.elapsed()
-    # {"P1_rollout": 120.5, "P2a_decode_render": 85.2, ...}  unit ms
-
-    # Automatic summary (per N (print once)
-    profiler.step(timings, global_step, print_freq=10)
-
-Usage (asynchronous version, double GPU Utilization + memory diagnostics):
-    profiler = AsyncPhaseProfiler(enabled=True)
-
-    profiler.tick("P1_rollout")
-    ...  # P1 + P2a + submit
-    profiler.tick("P2_wait_backward")
-    guidance_log = wait_and_backward(...)
-    profiler.set_guid_timing(async_result.guid_wall_start, async_result.guid_wall_end)
-    ...  # P3
-    profiler.tick("end")
-
-    timings = profiler.elapsed()
-    # Extras included: guid_gpu_active, overlap_guid_P3, train_gpu_idle, guid_gpu_idle
-    # Video memory:    mem@P1_rollout, mem@P2_wait_backward, ..., mem@peak  (GiB)
-"""
+"""PhaseProfiler — CUDA Event phase-level timing for OREO autograd phases."""
 
 import logging
 import time
@@ -53,24 +15,7 @@ import torch.distributed as dist
 
 @dataclass
 class PhaseProfiler:
-    """
-    Based on CUDA Event of Phase Level timer.
-
-    Features:
-    - Use torch.cuda.Event(enable_timing=True) precise measurement GPU time
-    - tick() Mark stage boundaries,elapsed() Return time spent at each stage
-    - step() Automatically accumulate statistics and print summary periodically
-    - enabled=False All operations are no-ops (zero overhead)
-
-    Output example (print_freq=10 every time 10 (print once):
-        [PhaseProfiler] Step 10 | avg over 10 steps (ms):
-          dense_sampling:     45.2
-          P1_rollout:        312.8
-          P2a_decode_render: 185.4
-          P2_guidance_bw:    523.1  ← Hidden parts of asynchronization
-          P3_grad_backward:  148.9
-          total:            1215.4
-    """
+    """CUDA-event phase timer for OREO autograd phases."""
     enabled: bool = True
     verbose: bool = True    # control step() Whether to print summary (multiple rank Only the main process is set True)
 

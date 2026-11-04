@@ -1,23 +1,7 @@
 """
-Renderer base class - Define a unified rendering pipeline interface
+Renderer base classes and shared camera / depth / SSAA utilities.
 
-Rendering pipeline 7 stage:
-    Stage 1: Input Preparation (Input preparation)
-    Stage 2: Camera Transform (camera transformation)
-    Stage 3: Geometry Processing (Geometry processing)
-    Stage 4: Rasterization Core (rasterization/rendering core)
-    Stage 5: Attribute Interpolation (Property interpolation/sampling)
-    Stage 6: Post-processing (Post-processing)
-    Stage 7: Output Assembly (Output assembly)
-
-Usage example:
-    class MyRenderer(BaseRenderer):
-        def _rasterize_core(self, processed_geometry, camera_data):
-            # Implement rasterization core logic
-            ...
-
-    renderer = MyRenderer(RenderConfig(resolution=512))
-    output = renderer.render(geometry, extrinsics, intrinsics)
+Defines the unified 7-stage rendering pipeline interface used by GS and Mesh backends.
 """
 
 from abc import ABC, abstractmethod
@@ -34,20 +18,7 @@ from easydict import EasyDict as edict
 
 @dataclass
 class RenderConfig:
-    """
-    Renderer configuration
-
-    Attributes:
-        resolution: Output image resolution (Pixel)
-        near: Near clipping plane distance
-        far: far clipping plane distance
-        ssaa: Oversampling anti-aliasing multiple (1=No oversampling)
-        bg_color: Background color, support:
-            - float: single gray value
-            - Tuple[float, float, float]: RGB value
-            - 'random': Random black and white background
-            - 'envmap': Sample from environment map
-    """
+    """Renderer config (resolution, near/far, bg, ...)."""
     resolution: int = 512
     near: float = 0.1
     far: float = 10.0
@@ -57,19 +28,7 @@ class RenderConfig:
 
 @dataclass
 class CameraData:
-    """
-    Camera data container
-
-    Attributes:
-        extrinsics: (4, 4) W2C Camera external parameter matrix (OpenCV Agreement)
-        intrinsics: (3, 3) Camera internal parameter matrix (normalized to [0, 1])
-        projection: (4, 4) OpenGL projection matrix
-        mvp: (4, 4) Model-View-Projection matrix
-        camera_center: (3,) Camera world coordinates
-        fov: Tuple[float, float] (fov_x, fov_y) radians
-        rays_o: Optional[(H, W, 3)] ray origin
-        rays_d: Optional[(H, W, 3)] Ray direction
-    """
+    """Camera bundle: extrinsics W2C, intrinsics, derived matrices."""
     extrinsics: torch.Tensor
     intrinsics: torch.Tensor
     projection: torch.Tensor
@@ -82,15 +41,7 @@ class CameraData:
 
 @dataclass
 class RasterOutput:
-    """
-    Rasterized output container
-
-    Attributes:
-        rast: Rasterized results (Depends on the specific implementation)
-        depth_buffer: (H, W) depth buffer
-        primitive_id: (H, W) primitive ID
-        barycentric: Optional[(H, W, 3)] Center of gravity coordinates
-    """
+    """Backend-specific rasterization outputs."""
     rast: Any
     depth_buffer: torch.Tensor
     primitive_id: torch.Tensor
@@ -99,22 +50,7 @@ class RasterOutput:
 
 @dataclass
 class RenderOutput:
-    """
-    Render output container
-
-    Dimension specification:
-        - 2D Properties (scalar): (H, W) - depth, alpha, mask
-        - 3D Properties (vector): (H, W, 3) - normal, color, shaded
-
-    Attributes:
-        depth: (H, W) Depth map
-        alpha: (H, W) Transparency/Coverage
-        mask: (H, W) binary mask
-        normal: Optional[(H, W, 3)] normal map (Visual format [0, 1])
-        color: Optional[(H, W, 3)] color map
-        shaded: Optional[(H, W, 3)] PBR Coloring results
-        extras: Dict[str, Tensor] Other custom properties
-    """
+    """Final render tensors (RGB, depth, normal, ...) with documented shapes."""
     depth: torch.Tensor
     alpha: torch.Tensor
     mask: torch.Tensor
@@ -149,17 +85,7 @@ def intrinsics_to_projection(
     near: float,
     far: float,
 ) -> torch.Tensor:
-    """
-    OpenCV Internal parameter matrix → OpenGL projection matrix
-
-    Args:
-        intrinsics: (3, 3) Normalized camera internal parameters (fx, fy, cx, cy in [0, 1])
-        near: near clipping plane
-        far: far clipping plane
-
-    Returns:
-        projection: (4, 4) OpenGL projection matrix
-    """
+    """OpenCV K -> OpenGL projection."""
     fx, fy = intrinsics[0, 0], intrinsics[1, 1]  # scalar
     cx, cy = intrinsics[0, 2], intrinsics[1, 2]  # scalar
 
@@ -180,17 +106,7 @@ def depth_to_normal(
     intrinsics: torch.Tensor,  # (3, 3)
     mask: Optional[torch.Tensor] = None,  # (H, W)
 ) -> torch.Tensor:
-    """
-    Estimating camera space normals from depth map
-
-    Args:
-        depth: (H, W) Depth map
-        intrinsics: (3, 3) Normalized camera internal parameters
-        mask: (H, W) optional mask
-
-    Returns:
-        normal: (H, W, 3) Camera space normal, positive toward the camera
-    """
+    """Estimate camera-space normals from a depth map."""
     H, W = depth.shape[-2:]
     depth = depth.reshape(H, W)  # (H, W)
     device = depth.device
@@ -237,16 +153,7 @@ def depth_to_normal(
 
 
 def camera_normal_to_vis(normal: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
-    """
-    Convert camera space normals to visualization format
-
-    Args:
-        normal: (H, W, 3) camera space normal (towards camera z < 0)
-        mask: (H, W) optional mask
-
-    Returns:
-        normal_vis: (H, W, 3) Visual format [0, 1]
-    """
+    """Map camera normals to a visualization RGB encoding."""
     normal_vis = -normal * 0.5 + 0.5  # (H, W, 3)
     if mask is not None:
         bg = torch.tensor([0.5, 0.5, 1.0], device=normal.device)  # neutral blue background
@@ -259,17 +166,7 @@ def ssaa_downsample(
     target_size: int,
     channel_first: bool = True,
 ) -> torch.Tensor:
-    """
-    SSAA Downsampling
-
-    Args:
-        img: high resolution images
-        target_size: target resolution
-        channel_first: Whether channel-first Format
-
-    Returns:
-        downsampled image
-    """
+    """Supersample anti-aliasing downsample to target size."""
     if not channel_first:
         img = img.permute(2, 0, 1)  # (H, W, C) -> (C, H, W)
 
@@ -293,24 +190,9 @@ def ssaa_downsample(
 
 class BaseRenderer(ABC):
     """
-    Renderer abstract base class
-
-    defines a unified 7 staged rendering pipeline:
-        1. prepare_inputs: Input preparation
-        2. compute_camera_data: camera transformation
-        3. process_geometry: Geometry processing
-        4. rasterize_core: Rasterization core (abstract method)
-        5. interpolate_attributes: Property interpolation
-        6. post_process: Post-processing
-        7. assemble_output: Output assembly
-
-    Subclasses must implement:
-        - _rasterize_core: Core rasterization logic
-        - _interpolate_attributes: Property interpolation logic
-
-    Optional override for subclasses:
-        - _process_geometry: Custom geometry processing
-        - _post_process: Custom post-processing
+    Abstract 7-stage renderer.
+    
+    1 prepare_input 2 camera_transform 3 rasterize 4 interpolate 5 shade 6 postprocess 7 pack_output
     """
 
     def __init__(self, config: RenderConfig, device: str = 'cuda'):
@@ -673,11 +555,7 @@ class BaseRenderer(ABC):
 # ============================================================================
 
 class PBRPostProcessMixin:
-    """
-    PBR Post-processing mix-ins
-
-    provide tone mapping and gamma Correction function
-    """
+    """Tone-mapping / gamma helpers for PBR shading."""
 
     @staticmethod
     def aces_tonemapping(x: torch.Tensor) -> torch.Tensor:

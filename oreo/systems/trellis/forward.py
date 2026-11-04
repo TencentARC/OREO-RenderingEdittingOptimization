@@ -1,13 +1,7 @@
 """
-Trellis Share forward propagation, rendering, and evaluation functions.
+Shared Trellis forward, decode+render, and evaluation helpers.
 
-from system.py Extracted pure calculation function for retained Dual-Stage Entry and evaluator reuse.
-
-Main components:
-1. decode_and_render_mesh: Decode SparseTensor → Mesh → Rendering multi-view images
-2. decode_and_render_gs:   Decode SparseTensor → Gaussian Splatting → Rendering multi-view images
-3. trellis_forward:        Shared forward pass (Dense Sampling → Rollout → Decode → Render)
-4. evaluate:               Evaluation loop (reasoning + Visual save)
+Extracted for Dual-Stage entry and eval scripts to reuse without duplicating system.py logic.
 """
 
 from __future__ import annotations
@@ -38,23 +32,7 @@ def decode_and_render_mesh(
     renderer: Any,  # TrellisMeshRasterizer
     device: torch.device,
 ) -> Dict[str, Any]:
-    """
-    The decoded latent variable is Mesh and render multi-view images.
-
-    Args:
-        latents: SparseTensor, rollout Output sparse features
-        cameras: TrellisState.Cameras, Camera parameter container
-        pipeline: generate pipeline, provide decode method
-        renderer: Mesh Renderer instance
-        device: Run the device
-
-    Returns:
-        dict: Rendered output, including:
-            - "color": (B,V,H,W,3) Rendered colormap
-            - "normal": (B,V,H,W,3) normal map
-            - "depth": (B,V,H,W,1) Depth map
-            - "meshes": list[len=B] of MeshExtractResult
-    """
+    """Decode latents -> mesh -> multi-view images."""
     # ---- Decode ----
     outputs = pipeline.sparse.decode(latents, formats=['mesh'])  # dict
     meshes = outputs['mesh']  # list[len=B] of MeshExtractResult
@@ -113,21 +91,7 @@ def decode_and_render_gs(
     renderer: Any,  # GaussianRenderer
     device: torch.device,
 ) -> Dict[str, Any]:
-    """
-    The decoded latent variable is Gaussian Splatting and render multi-view images.
-
-    Args:
-        latents: SparseTensor, rollout Output sparse features
-        cameras: TrellisState.Cameras, Camera parameter container
-        pipeline: generate pipeline, provide decode method
-        renderer: GS Renderer instance
-        device: Run the device
-
-    Returns:
-        dict: Rendered output, including:
-            - "color": (B,V,H,W,3) Rendered colormap
-            - "gaussians": list[len=B] of Gaussian object
-    """
+    """Decode latents -> Gaussians -> multi-view images."""
     # ---- Decode ----
     outputs = pipeline.sparse.decode(latents, formats=['gaussian'])  # dict
     gaussians = outputs['gaussian']  # list[len=B] of Gaussian
@@ -176,31 +140,7 @@ def trellis_forward(
     global_step: int,
     is_training: bool = True,
 ) -> Dict[str, Any]:
-    """
-    Trellis Forward propagation:Dense Sampling → Rollout → Decode → Render
-
-    Extract shared forward logic for reuse by training, evaluation, and pipelined parallel versions.
-
-    Note: When calling this function, it needs to be used in the outer layer TrainModeGuard(during training) or EvalModeGuard(at the time of evaluation).
-
-    Args:
-        system: system components (pipeline,renderer)
-        state: TrellisState status object (mounted batch data, including conditional encoding)
-        cfg: Configuration object
-        device: Run the device
-        global_step: global steps (for random seed)
-        is_training: Whether it is training mode
-
-    Returns:
-        render_out: Render output dictionary, containing:
-            - "color": (B,V,H,W,C) render image
-            - "meshes" or "gaussians": 3D Representation (for export)
-
-    Side Effects:
-        - state.coords: Mount sparse coordinates
-        - state.stage2.reg_loss: mount reg_loss
-        - state.views_generated.image_tensor: Mount rendered image
-    """
+    """Dense sample -> rollout -> decode -> render shared forward."""
     pipeline = system.pipeline
 
     # Use a fixed seed when evaluating (to ensure reproducibility), and press step change
@@ -263,32 +203,7 @@ def evaluate(
     eval_loader: Any,
     visuals_eval_dir: Path,
 ) -> Dict[str, Any]:
-    """
-    Evaluate function: perform inference and save visualization results.
-
-    Complete evaluation process:
-    1. Extract conditional encoding from image
-    2. execute Dense Sampling generate sparse structures
-    3. execute Sparse Sampling Generate features
-    4. Decoded as 3D means (mesh or GS)
-    5. Render multi-view images and save them
-    6. Export mesh File
-
-    Note: passed during reasoning inference_context() peel off DDP packaging,
-        make pipeline Use the original model directly (with the official TRELLIS The reasoning path is consistent).
-
-    Args:
-        system: system components
-        cfg: Configuration object
-        accelerator: Accelerate accelerator
-        epoch: current epoch
-        global_step: global steps
-        eval_loader: Evaluate data loader
-        visuals_eval_dir: Visual output directory
-
-    Returns:
-        dict: Evaluation log dictionary
-    """
+    """Run inference and save visualization artifacts."""
     if eval_loader is None:
         return {}
 

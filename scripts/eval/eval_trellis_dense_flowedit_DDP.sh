@@ -1,32 +1,23 @@
 #!/bin/bash
-# Dense FlowEdit evaluation script (DDP Doka)
+# Dense FlowEdit evaluation (multi-GPU DDP).
 #
-# Comparison:
-#   Teacher (pretrained): Dense ODE → Sparse ODE
-#   Student (finetuned) : Dense ODE → Dense FlowEdit → Sparse ODE
+# Compare:
+#   Teacher (pretrained): Dense ODE -> Sparse ODE
+#   Student (finetuned):  Dense ODE -> Dense FlowEdit -> Sparse ODE
 #
 # Usage:
 #   bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh
 #   bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh <CKPT_INPUT>
 #   bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh <CKPT_INPUT> <EVAL_DATASET>
 #
-# CKPT_INPUT Three inputs are supported:
-#   1) "" -> Not loading checkpoint(student ≈ teacher, for verification framework)
-#   2) ".../checkpoints/checkpoint_xxx" -> single ckpt
-#   3) ".../checkpoints" -> Traverse all checkpoint_*
+# CKPT_INPUT:
+#   1) "" -> no checkpoint (student ~= teacher, framework check)
+#   2) ".../checkpoints/checkpoint_xxx" -> one ckpt
+#   3) ".../checkpoints" -> walk all checkpoint_*
 #
-# EVAL_DATASET Support:
-#   1) alphaimages   -> dataset/alphaimages_v3/test(default)
-#   2) alphaimage_train -> dataset/alphaimages_v3/train
-#   3) gso_selected  -> dataset/gso_test_selected
-#   4) toys4k        -> dataset/toys4k_test
+# EVAL_DATASET: alphaimages | alphaimage_train | gso_selected | toys4k
+# FlowEdit knobs: append --config.rollout.flowedit.*
 #
-# FlowEdit Parameters can be passed by appending --config.rollout.flowedit.* Override the default value, for example:
-#   bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh <CKPT> gso_selected \
-#     --config.rollout.flowedit.n_max=12 \
-#     --config.rollout.flowedit.cfg_scale_tgt=4.0 \
-#     --config.rollout.flowedit.cfg_scale_src=-4.0
-
 set -euo pipefail
 
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7

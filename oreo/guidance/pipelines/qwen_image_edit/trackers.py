@@ -1,8 +1,4 @@
-"""Qwen-Image FlowEdit state tracker.
-
-The retained FlowEdit pipeline records source/target x0 predictions with
-StateTracker and the random/fixed/aligned/delta BaseNoiseMixin modes.
-"""
+"""Qwen-Image FlowEdit StateTracker: records src/tgt x0 preds under random/fixed/aligned/delta noise."""
 
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -24,36 +20,7 @@ from ..utils import (
 
 @dataclass
 class StateTracker(BaseStateTracker, LossMixin, VisualizationMixin, BaseNoiseMixin):
-    """
-    Unified Status Tracker (random / fixed / aligned / delta mode).
-
-    Storage:
-    - x0_preds: Predictive x0(MSE loss target)
-    - x0_pos: CSD Positive sample (high CFG x0 predict, attract)
-    - x0_neg: CSD Negative samples (low CFG x0 prediction, rejection)
-    - ts: time step list
-
-    Pass mse_weight / csd_weight control loss Type:
-    - mse_weight=1 → pure MSE: MSE(src, x0_pred)
-    - csd_weight=1 → pure CSD: MSE(src, x0_pos) - MSE(src, x0_neg)
-
-    Noise pattern:
-    - random / fixed / aligned: see BaseNoiseMixin
-    - delta: Dual branch differential compensation ε -= v_delta * dt,update() Need to be passed in v_delta and dt
-
-    How to use:
-        tracker = StateTracker(height=H, width=W)
-        tracker.init(x_src, mode="aligned", seed=0)
-        for t in timesteps:
-            noise = tracker.get_noise(x_src)
-            z_t = (1 - t) * x_src + t * noise
-            v_cond, v_uncond, v_cfg = model(z_t, t)
-            x0_pred = z_t - t * v_cfg
-            x0_pos = z_t - t * v_cond
-            x0_neg = z_t - t * v_uncond
-            tracker.record(x0_pred, t, x0_pos, x0_neg)
-            tracker.update(v_cond, v_uncond, v_cfg, t, dt)  # delta The mode needs to be passed v_delta=...
-    """
+    """Stores x0_preds and related tensors for multi-step MSE / contrastive losses."""
 
     # Prediction results
     x0_preds: List[torch.Tensor] = field(default_factory=list)    # MSE target
@@ -139,7 +106,7 @@ def create_flowedit_tracker(
     height: int = None,
     width: int = None,
 ) -> FlowEditTracker:
-    """Create the retained FlowEdit tracker for a supported noise mode."""
+    """Build the retained FlowEdit tracker for a supported noise mode."""
     if noise_mode not in {"random", "fixed", "aligned", "delta"}:
         raise ValueError(
             f"Unsupported FlowEdit noise mode: {noise_mode!r}; "

@@ -1,9 +1,4 @@
-"""
-Base class definition.
-
-contains:
-- BaseStateTracker: Status tracker base class
-"""
+"""BaseStateTracker shared by FlowEdit / CSD / SDS-style trackers."""
 
 from dataclasses import dataclass
 from typing import Any, List, Optional
@@ -13,18 +8,7 @@ from PIL import Image
 
 @dataclass
 class BaseStateTracker:
-    """
-    Status tracker base class.
-
-    all Guidance methodological Tracker(FlowEdit,CSD,SDS) all inherit this class.
-
-    Common attributes:
-        - height, width: Image size (for decode)
-
-    Subclasses should pass Mixin Or a direct implementation provides:
-        - target: target latent(for loss calculation)
-        - loss(): main loss Calculation method (by LossMixin provided)
-    """
+    """Abstract tracker API all guidance methods inherit."""
 
     height: int = 0
     width: int = 0

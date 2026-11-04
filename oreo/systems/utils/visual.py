@@ -1,4 +1,4 @@
-"""VisualIO - training/Assessment visualization save"""
+"""VisualIO — save training / eval visualization grids and dumps."""
 import os
 import numpy as np
 from PIL import Image

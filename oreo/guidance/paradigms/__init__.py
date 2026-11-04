@@ -1,9 +1,4 @@
-"""
-Guidance Paradigms module.
-
-provide retained Guidance Paradigm implementation:
-- FlowEdit: Multi-step editing training/Reasoning (general vs. pipeline-parallel variant)
-"""
+"""Guidance paradigms: retained FlowEdit (standard and pipeline-parallel)."""
 
 from oreo.guidance.paradigms.flowedit import FlowEditGuidance, FlowEditGuidancePP
 

@@ -1,14 +1,10 @@
 """
-Trellis three stages Autograd — Phase 3 VJP Realize.
+Phase-3 VJP backward for Trellis three-phase autograd (O(1) memory per step).
 
-Phase 3: phase3_rollout_grad_backward
-  Gradual recalculation cond f_θ → VJP backward → θ.grad Accumulation (Video Memory O(1))
+Phases 0/1/2 live in stage_ops.py and autograd_template.py.
 
-Others Phase (0/1/2) Migrated to:
-  - stage_ops.py        — pre_rollout (inline dense sampling), rollout, decode_render
-  - autograd_template.py — Arrange + guidance backward + decode-grad
-
-Design reference:trellis2_distill branched trellis2_shape_autograd_async.py
+VJP: recomputes cond f_theta only, merges guidance_grad + reg_weight*reg_grad, then
+(v_grad * cond_pred.feats).sum().backward().
 """
 
 from __future__ import annotations
@@ -39,24 +35,7 @@ def phase3_rollout_grad_backward(
     device: torch.device,
     tracker: RolloutTracker,
 ) -> None:
-    """
-    Phase 3: Gradual recalculation cond f_θ → VJP backward → θ.grad Accumulate.
-
-    Video memory O(1): Each step only retains a single f_θ The calculation graph ofVJP released immediately.
-
-    - v_grad from tracker.output_trajectory[i].grad(Phase 2 backward padding, only guidance gradient)
-    - reg_grads from tracker.reg_grads(Phase 1 autograd.grad precomputed)
-    - Phase 3 merge both: v_grad = guidance_grad + reg_weight * reg_grad
-    - Recalculate conditional forecasts only f_θ(x_t, t), no need uncond / CFG / reg
-    - VJP: (v_grad * cond_pred.feats).sum().backward()
-
-    Args:
-        state: TrellisState
-        system: system components
-        cfg: Configuration object
-        device: Run the device
-        tracker: Phase 1 filled RolloutTracker
-    """
+    """Recompute cond velocity per step -> VJP into theta.grad; release graph immediately."""
     pipeline = system.pipeline
     cond_emb, _ = state.extract_embeddings()
     cond_emb = cond_emb.to(device)  # (B, S, C)
@@ -92,9 +71,9 @@ def phase3_rollout_grad_backward(
             if has_reg_grads:
                 v_grad = v_grad + reg_weight * tracker.reg_grads[i]  # (N, C)
 
-            # ---- VJP:(v_grad * cond_pred.feats).sum().backward() ----
-            # The picture only contains this time f_θ call,backward released immediately after
-            (v_grad * cond_pred.feats).sum().backward()  # θ.grad += ...
+            # ---- VJP: (v_grad * cond_pred.feats).sum().backward() ----
+            # Graph holds only this f_theta call; freed right after backward.
+            (v_grad * cond_pred.feats).sum().backward()  # theta.grad += ...
         except torch.cuda.OutOfMemoryError:
             logging.warning(
                 f"P3 VJP step {i}/{T} OOM → partial grad"

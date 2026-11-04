@@ -1,4 +1,4 @@
-"""SSIM loss."""
+"""SSIM-based loss: loss = 1 - SSIM."""
 import logging
 from typing import Optional
 
@@ -9,11 +9,7 @@ from .base import BaseMetric
 
 
 class SSIMMetric(BaseMetric):
-    """
-    SSIM Similarity Metric.
-
-    SSIM The higher they are, the more similar they are,loss = 1 - SSIM.
-    """
+    """Higher SSIM => more similar; returns 1 - SSIM."""
 
     name = "ssim"
 

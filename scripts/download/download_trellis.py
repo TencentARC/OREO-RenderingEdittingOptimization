@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""
-Use huggingface_hub.snapshot_download Download TRELLIS-image-large to local
-(default path: project root/pretrained_weights/TRELLIS-image-large), maintaining the official directory structure.
-
-Usage:
-    python scripts/download/download_trellis.py [--dest DIR] [--repo-id microsoft/TRELLIS-image-large] [--local-only]
-
-Description:
-- By default, the network is downloaded and cached; if added --local-only Then it only relies on the existing cache (the cache needs to be complete).
-"""
+"""Download TRELLIS-image-large pretrained weights via huggingface_hub.snapshot_download."""
 
 import argparse
 import os

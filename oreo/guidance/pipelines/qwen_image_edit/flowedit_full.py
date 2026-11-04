@@ -1,3 +1,9 @@
+"""
+Qwen-Image-Edit FlowEdit pipeline: differential velocity editing with trackable x0 predictions.
+
+OREO role: 2D guidance that turns rendered views into c_src / c_tgt (or pixel losses).
+"""
+
 # Copyright 2025 Qwen-Image Team and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -49,15 +55,7 @@ VAE_IMAGE_SIZE = 1024 * 1024
 
 @dataclass
 class FlowEditPipelineOutput(BaseOutput):
-    """
-    Output class for FlowEdit pipeline.
-
-    Args:
-        images: Generated images (PIL or tensor)
-        latents: Edited latents in packed format [B, seq_len, C]
-        tracker_tgt: StateTracker for target branch records (None if tgt_branch disabled)
-        tracker_src: StateTracker for source branch records (None if src_branch disabled)
-    """
+    """Output of FlowEdit pipeline (images and optional latents / trackers)."""
     images: Any
     latents: Optional[torch.Tensor] = None
     tracker_tgt: Optional[StateTracker] = None
@@ -69,12 +67,7 @@ class FlowEditPipelineOutput(BaseOutput):
 
 
 class FlowEditPipeline(BaseEditPlusPipeline, DifferentiableVAEMixin):
-    """
-    FlowEdit pipeline for image editing using differential velocity fields.
-
-    Inherits from QwenImageEditPlusPipeline and overrides __call__ with FlowEdit algorithm.
-    This version uses full model inference for both source and target branches.
-    """
+    """Differential velocity-field image editing pipeline (extends QwenImageEdit)."""
 
     def _decode_latent_to_image(
         self,

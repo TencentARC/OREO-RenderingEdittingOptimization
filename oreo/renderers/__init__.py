@@ -1,24 +1,7 @@
 """
-oreo renderer module
+OREO renderer package. All renderers inherit BaseRenderer's 7-stage pipeline.
 
-All renderers inherit from BaseRenderer, follow the unified 7 staged rendering pipeline:
-    Stage 1: Input Preparation (Input preparation)
-    Stage 2: Camera Transform (camera transformation)
-    Stage 3: Geometry Processing (Geometry processing)
-    Stage 4: Rasterization Core (rasterization/rendering core)
-    Stage 5: Attribute Interpolation (Property interpolation/sampling)
-    Stage 6: Post-processing (Post-processing)
-    Stage 7: Output Assembly (Output assembly)
-
-Renderer list:
-    - BaseRenderer: abstract base class
-    - TrellisMeshRasterizer: Mesh rasterizer (nvdiffrast)
-    - GaussianRenderer: 3D Gaussian Splatting Renderer (need trellis module)
-    - VoxelRenderer: Basic voxel renderer (o_voxel)
-    - PbrVoxelRenderer: PBR Shaded voxel renderer
-    - DiffVoxelRenderer: Differentiable voxel renderer (STE)
-    - SoftVoxelRenderer: pure PyTorch Differentiable voxel renderer
-    - Quad12NormalRenderer: 12-Quad normal renderer
+Stages: Input -> Camera -> Rasterize -> Attribute -> Shade -> Post -> Output.
 """
 
 # Base classes and tools

@@ -1,12 +1,9 @@
 """
-Trellis Rollout module
+Trellis Rollout package: ODE sampling and FlowEdit differential dual-branch sampling.
 
-Provides sampling mode:
-- ODE: Standard Euler sampling, for inference and ReFL/DRaFT style training
-- FlowEdit: Differential two-branch sampling, for inference only/Assessment
-
-Tracker class:
-- RolloutTracker (rollout.autograd_tracker): three stages Autograd of cond-level proxy logger
+- ODE: Euler sampling for inference and ReFL/DRaFT-style training
+- FlowEdit: dual-branch differential sampling for eval
+Also exports RolloutTracker / VelocityTracker for three-phase autograd.
 """
 
 from .base import mix_cfg_sparse, _predict_sparse_cond_velocity, auto_device_sparse, auto_device_dense, predict_sparse_velocity_with_cfg
