@@ -1,6 +1,6 @@
 # OREO setup
 
-This document is the setup guide for the public OREO Dual-Stage Contrastive FlowEdit release. It describes a standalone Linux/CUDA environment and does not require Koala, a private S3 bucket, or internal infrastructure.
+This document is the detailed install guide for the public OREO Dual-Stage Contrastive FlowEdit release (Python/CUDA env, reference code, model and dataset downloads, offline mode). For a short product overview plus train/eval commands, see [`README.md`](README.md). The workflow is standalone Linux/CUDA and does not require Koala, a private S3 bucket, or internal infrastructure.
 
 ## Requirements
 
@@ -22,7 +22,7 @@ The verified environment uses:
 | PEFT | 0.17.1 |
 | Open3D | 0.19.0 |
 
-Use Linux with an NVIDIA GPU and a CUDA 12.4 compatible driver. The remaining Python dependencies are pinned in [`requirements.txt`](requirements.txt). Do not upgrade Transformers to 5.x in this environment. Build Flash Attention after installing the matching PyTorch wheel.
+Use Linux with an NVIDIA GPU and a CUDA 12.4 compatible driver (enough VRAM for TRELLIS + Qwen-Image-Edit in shared-device mode; one GPU is fine for smoke tests). The remaining Python dependencies are pinned in [`requirements.txt`](requirements.txt), including `kaolin==0.18.0` from the matching torch 2.6.0 / cu124 wheel index. Do not upgrade Transformers to 5.x (breaks Qwen prompt encoding with Diffusers 0.38.0). Build Flash Attention after installing the matching PyTorch wheel, and set `TORCH_CUDA_ARCH_LIST` to arches your GPUs actually need.
 
 ## Install the environment
 
@@ -60,7 +60,8 @@ Set the runtime variables before training or evaluation:
 ```bash
 export ATTN_BACKEND=flash_attn
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export CUDA_VISIBLE_DEVICES=0
+export SPCONV_ALGO=auto
+export CUDA_VISIBLE_DEVICES=0   # or a comma-separated GPU list
 ```
 
 Set `HF_HOME` and `TORCH_HOME` if the model caches should live outside their default locations. Set `HF_TOKEN` only when Hugging Face requires authentication for a download.
@@ -113,6 +114,33 @@ bash scripts/download/prepare_toys4k_dataset.sh
 
 The prepared datasets are consumed by the training and evaluation entry points.
 
+## Released OREO checkpoint (`oreo_v1`)
+
+Public weights live on Hugging Face at [`TencentARC/OREO`](https://huggingface.co/TencentARC/OREO) (`oreo_v1`, from training `checkpoint_10_3157`). The Dual-Stage loader expects a **flat** directory with both:
+
+- `model.safetensors` → dense / `slat_flow_model`
+- `model_1.safetensors` → sparse / `sparse_structure_flow_model`
+
+```bash
+hf download TencentARC/OREO --include 'oreo_v1/*' --local-dir ./checkpoints/oreo_v1
+# Confirm the two .safetensors files sit directly under ./checkpoints/oreo_v1/
+```
+
+## Train and eval entry points
+
+From the repository root (after the environment, `_reference_codes/`, weights, and datasets are ready):
+
+```bash
+# Train — single node / few GPUs, or multi-GPU launcher
+CUDA_VISIBLE_DEVICES=0 bash scripts/single_node/main_trellis_oreo.sh
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/multi_node/main_trellis_oreo.sh
+
+# Eval — CKPT_INPUT may be empty (pretrained baseline), a flat Dual-Stage dir, or a checkpoints/ folder
+bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh ./checkpoints/oreo_v1 alphaimages
+```
+
+`EVAL_DATASET` options include `alphaimages`, `alphaimage_train`, `gso_selected`, and `toys4k`. See [`README.md`](README.md) for the short command list.
+
 ## Offline use
 
 After the model and dataset downloads complete, set the cache locations and enable offline mode:
@@ -126,8 +154,14 @@ export DIFFUSERS_OFFLINE=1
 Keep the following paths available from the repository root:
 
 ```text
+_reference_codes/TRELLIS
+_reference_codes/TripoSF
 pretrained_weights/TRELLIS-image-large
 pretrained_weights/dinov2-giant
 dataset/alphaimages_v3/train
 dataset/alphaimages_v3/test
+checkpoints/oreo_v1/model.safetensors
+checkpoints/oreo_v1/model_1.safetensors
 ```
+
+If imports fail early with missing TRELLIS modules, re-check the `_reference_codes/TRELLIS` clone (`--recursive`). If checkpoint load raises `FileNotFoundError`, both flat safetensors files must be present in the checkpoint directory.
