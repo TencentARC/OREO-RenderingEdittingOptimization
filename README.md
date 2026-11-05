@@ -44,7 +44,7 @@ hf download TencentARC/OREO --include 'oreo_v1/*' --local-dir ./checkpoints/oreo
 ## Evaluation
 
 ```bash
-bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh \
+bash scripts/eval/eval_trellis_DDP.sh \
   ./checkpoints/oreo_v1 alphaimages
 ```
 

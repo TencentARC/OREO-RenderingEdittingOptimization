@@ -1,22 +1,20 @@
 #!/bin/bash
-# Dense FlowEdit evaluation (multi-GPU DDP).
+# Teacher/Student TRELLIS evaluation (multi-GPU DDP).
 #
-# Compare:
-#   Teacher (pretrained): Dense ODE -> Sparse ODE
-#   Student (finetuned):  Dense ODE -> Dense FlowEdit -> Sparse ODE
+# Both teacher and student use Dense ODE -> Sparse ODE (no FlowEdit).
 #
 # Usage:
-#   bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh
-#   bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh <CKPT_INPUT>
-#   bash scripts/eval/eval_trellis_dense_flowedit_DDP.sh <CKPT_INPUT> <EVAL_DATASET>
+#   bash scripts/eval/eval_trellis_DDP.sh
+#   bash scripts/eval/eval_trellis_DDP.sh <CKPT_INPUT>
+#   bash scripts/eval/eval_trellis_DDP.sh <CKPT_INPUT> <EVAL_DATASET>
 #
 # CKPT_INPUT:
 #   1) "" -> no checkpoint (student ~= teacher, framework check)
-#   2) ".../checkpoints/checkpoint_xxx" -> one ckpt
+#   2) ".../checkpoints/checkpoint_xxx" or "./checkpoints/oreo_v1" -> one ckpt
 #   3) ".../checkpoints" -> walk all checkpoint_*
 #
 # EVAL_DATASET: alphaimages | alphaimage_train | gso_selected | toys4k
-# FlowEdit knobs: append --config.rollout.flowedit.*
+# Extra config flags can be appended, e.g. --config.data.eval.n_view=5
 #
 set -euo pipefail
 
@@ -24,7 +22,6 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 CKPT_INPUT="${1:-}"
 EVAL_DATASET="${2:-alphaimages}"
-# Collect the remaining parameters (FlowEdit coverage items)
 if [ "$#" -ge 2 ]; then
     shift 2
 elif [ "$#" -eq 1 ]; then
@@ -62,7 +59,6 @@ CONFIG="config/trellis_oreo.py"
 GPU_COUNT=$(echo "$CUDA_VISIBLE_DEVICES" | tr ',' '\n' | wc -l)
 CKPT_INPUT="${CKPT_INPUT%/}"
 
-# Build to be evaluated ckpt list
 CKPT_LIST=()
 if [ -z "$CKPT_INPUT" ]; then
     CKPT_LIST+=("")
@@ -71,7 +67,7 @@ elif [ "$(basename "$CKPT_INPUT")" = "checkpoints" ]; then
         find "$CKPT_INPUT" -maxdepth 1 -mindepth 1 -type d -name "checkpoint_*" | sort -V
     )
     if [ "${#CKPT_LIST[@]}" -eq 0 ]; then
-        echo "Error: in $CKPT_INPUT Not found below checkpoint_*"
+        echo "Error: no checkpoint_* under $CKPT_INPUT"
         exit 1
     fi
 else
@@ -79,21 +75,25 @@ else
 fi
 
 echo "========================================"
-echo "Dense FlowEdit DDP Assessment"
+echo "Teacher/Student DDP evaluation"
 echo "========================================"
-echo "visible GPU: $CUDA_VISIBLE_DEVICES ($GPU_COUNT Zhang)"
+echo "visible GPUs: $CUDA_VISIBLE_DEVICES ($GPU_COUNT)"
 echo "EVAL_DATASET: $EVAL_DATASET"
 echo "EVAL_DIR: $EVAL_DIR"
 echo "LOGDIR_ROOT: $LOGDIR_ROOT"
 echo "CONFIG: $CONFIG"
-echo "CKPT_INPUT: ${CKPT_INPUT:-(None, use pretrained)}"
-echo "Quantity to be evaluated: ${#CKPT_LIST[@]}"
-[ "${#EXTRA_ARGS[@]}" -gt 0 ] && echo "extra parameters: ${EXTRA_ARGS[*]}"
+echo "CKPT_INPUT: ${CKPT_INPUT:-(none, use pretrained)}"
+echo "checkpoints to evaluate: ${#CKPT_LIST[@]}"
+[ "${#EXTRA_ARGS[@]}" -gt 0 ] && echo "extra args: ${EXTRA_ARGS[*]}"
 echo "========================================"
 
 for CKPT in "${CKPT_LIST[@]}"; do
     if [ -n "$CKPT" ]; then
         TRAIN_RUN=$(basename "$(dirname "$(dirname "$CKPT")")")
+        # Flat release layout like ./checkpoints/oreo_v1 -> use basename as run name.
+        if [ "$TRAIN_RUN" = "." ] || [ "$TRAIN_RUN" = "/" ] || [ "$TRAIN_RUN" = "checkpoints" ]; then
+            TRAIN_RUN=$(basename "$CKPT")
+        fi
         CKPT_NAME=$(basename "$CKPT")
         RUN_NAME="${TRAIN_RUN}${RUN_SUFFIX}"
     else
@@ -101,8 +101,7 @@ for CKPT in "${CKPT_LIST[@]}"; do
         CKPT_NAME="pretrained_baseline"
     fi
 
-    # The output directory suffix is the same as in the script _dense_flowedit consistent
-    OUT_DIR="${LOGDIR_ROOT}/${RUN_NAME}/eval_teacher_student/${CKPT_NAME}_dense_flowedit"
+    OUT_DIR="${LOGDIR_ROOT}/${RUN_NAME}/eval_teacher_student/${CKPT_NAME}"
     DONE_FLAG="${OUT_DIR}/teacher_student_similarity.csv"
     IS_COMPLETE=0
     if [ -f "$DONE_FLAG" ]; then
@@ -120,18 +119,18 @@ PY
     fi
 
     if [ "$IS_COMPLETE" -eq 1 ]; then
-        echo "skip completed ckpt: ${CKPT:-(None, use pretrained)}"
-        echo "Already have results: $DONE_FLAG"
+        echo "skip completed ckpt: ${CKPT:-(none, use pretrained)}"
+        echo "existing results: $DONE_FLAG"
         continue
     elif [ -f "$DONE_FLAG" ]; then
-        echo "Incomplete detected CSV, will skip the completed sample and continue to make up the run: $DONE_FLAG"
+        echo "incomplete CSV detected; will resume: $DONE_FLAG"
     fi
 
-    echo "------------ Start assessment ------------"
+    echo "------------ start evaluation ------------"
     echo "RUN_NAME: $RUN_NAME"
-    echo "CKPT: ${CKPT:-(None, use pretrained)}"
+    echo "CKPT: ${CKPT:-(none, use pretrained)}"
     echo "OUT_DIR: $OUT_DIR"
-    echo "----------------------------------"
+    echo "------------------------------------------"
 
     PYTHONPATH="$(pwd):${PYTHONPATH:-}" \
     NCCL_TIMEOUT=1800 \
@@ -140,7 +139,7 @@ PY
         --num_processes="$GPU_COUNT" \
         --multi_gpu \
         --main_process_port="$(shuf -i 20000-29000 -n 1)" \
-        scripts/eval/eval_trellis_dense_flowedit.py \
+        scripts/eval/eval_trellis.py \
         --config="$CONFIG" \
         --config.run_name="$RUN_NAME" \
         --config.checkpoint="${CKPT}" \
