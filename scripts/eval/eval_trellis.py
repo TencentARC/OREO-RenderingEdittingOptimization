@@ -1,4 +1,8 @@
-"""Dense FlowEdit evaluation: compare teacher ODE vs student Dense-FlowEdit pipelines."""
+"""Teacher/Student TRELLIS evaluation (Dense ODE -> Sparse ODE for both).
+
+Compares a pretrained teacher against a Dual-Stage finetuned student with
+CLIP / DINO similarity to the conditioning image. No FlowEdit / Qwen path.
+"""
 
 import csv
 import json
@@ -22,8 +26,6 @@ from contextlib import nullcontext
 from PIL import Image
 from tqdm import tqdm
 from absl import app
-from ml_collections import config_flags
-import ml_collections
 from accelerate import Accelerator
 
 from oreo.systems.trellis.system import (
@@ -37,9 +39,6 @@ from oreo.datasets.trellis import (
     TrellisDataModule,
 )
 from oreo.generators.trellis.state import TrellisState
-from oreo.generators.trellis.rollout import rollout_sparse, rollout_dense
-from oreo.generators.trellis.rollout.flowedit import rollout_dense_flowedit
-from oreo.systems.trellis.forward import decode_and_render_gs, decode_and_render_mesh
 from oreo.systems.trellis.checkpoint import (
     load_full_dual_checkpoint,
     validate_student_diff,
@@ -52,38 +51,6 @@ from oreo.guidance.metric.dino import DINOMetric
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-
-# =====================================================================
-# FlowEdit Default parameters (available via --config.rollout.flowedit.* coverage)
-# =====================================================================
-
-_FE_DEFAULTS = {
-    "steps": 12,
-    "n_max": 9,
-    "cfg_scale_tgt": 3.0,
-    "cfg_scale_src": -3.0,
-}
-
-
-def _ensure_flowedit_cfg(cfg: ml_collections.ConfigDict) -> None:
-    """If cfg.rollout.flowedit If it does not exist, a default value will be injected.
-
-    ml_collections ConfigDict in absl is locked after parsing, must first unlock Add new key.
-    """
-    if not hasattr(cfg.rollout, "flowedit"):
-        fe = ml_collections.ConfigDict({
-            "steps": _FE_DEFAULTS["steps"],
-            "n_max": _FE_DEFAULTS["n_max"],
-            "cfg_scale_tgt": _FE_DEFAULTS["cfg_scale_tgt"],
-            "cfg_scale_src": _FE_DEFAULTS["cfg_scale_src"],
-        })
-        with cfg.rollout.unlocked():
-            cfg.rollout.flowedit = fe
-
-
-# =====================================================================
-# Utility functions (and general teacher/student assessment remains consistent)
-# =====================================================================
 
 def build_eval_dataloader(cfg, accelerator: Accelerator):
     train_cam_cfg = TrellisCameraTrainConfig(
@@ -172,7 +139,7 @@ def _load_existing_eval_rows(
     fields: List[str],
     expected_views: int,
 ) -> Tuple[List[Dict[str, Any]], Set[str]]:
-    """Read existing CSV, returns the written rows and view Count the complete sample name."""
+    """Read an existing CSV; return written rows and fully completed sample names."""
     if not csv_path.exists():
         return [], set()
 
@@ -198,10 +165,6 @@ def _load_existing_eval_rows(
     }
     return list(rows_by_key.values()), completed
 
-
-# =====================================================================
-# EvalMetricLogger(with universal teacher/student assessment remains consistent)
-# =====================================================================
 
 class EvalMetricLogger:
     def __init__(
@@ -283,60 +246,6 @@ class EvalMetricLogger:
         return avg
 
 
-# =====================================================================
-# Student Forward:Dense ODE + Dense FlowEdit + Sparse ODE
-# =====================================================================
-
-def trellis_forward_dense_flowedit(
-    system,
-    state: TrellisState,
-    cfg: ml_collections.ConfigDict,
-    device: torch.device,
-) -> Dict[str, Any]:
-    """
-    Student Dedicated forward:Dense ODE → Dense FlowEdit → decode_to_coords → Sparse ODE → Render
-
-    FlowEdit Parameters from cfg.rollout.flowedit Read.
-    """
-    pipeline = system.pipeline
-    _seed = int(cfg.seed)
-
-    # ---- Stage 1: Dense ODE + FlowEdit ----
-    # rollout_dense_flowedit Run internally first ODE(CPU gen), run again FlowEdit(CUDA gen, seeds+1)
-    gen_dense = torch.Generator(device="cpu").manual_seed(_seed)
-    with torch.no_grad():
-        rollout_dense_flowedit(state, cfg, system, device, generator=gen_dense)
-    # state.stage1.z0 = FlowEdit edited dense latent
-
-    batch_size = state.stage1.z0.shape[0]
-    state.coords = pipeline.dense.decode_to_coords(state.stage1.z0, batch_size=batch_size)
-
-    # ---- Stage 2: Sparse ODE ----
-    gen_sparse = torch.Generator(device=device).manual_seed(_seed)
-    with torch.no_grad():
-        rollout_sparse(state, cfg, system, device, generator=gen_sparse, is_training=False)
-    latents = state.stage2.z0
-
-    torch.cuda.empty_cache()
-
-    # ---- Decode & Render ----
-    renderer_type = cfg.renderer.type
-    renderer = system.renderers[renderer_type]
-
-    if renderer_type == "gs":
-        render_out = decode_and_render_gs(latents, state.cameras, pipeline, renderer, device)
-    else:
-        render_out = decode_and_render_mesh(latents, state.cameras, pipeline, renderer, device)
-        render_out["color"] = render_out["normal"]
-
-    state.views_generated.image_tensor = render_out["color"]
-    return render_out
-
-
-# =====================================================================
-# DDP barrier
-# =====================================================================
-
 def _dist_barrier(local_rank: int) -> None:
     import torch.distributed as dist
     if dist.is_initialized():
@@ -344,22 +253,17 @@ def _dist_barrier(local_rank: int) -> None:
         dist.all_reduce(t, op=dist.ReduceOp.SUM)
 
 
-# =====================================================================
-# Main process
-# =====================================================================
-
 def main(argv) -> None:
     del argv
     cfg = _CONFIG.value
     cfg.eval_only = True
 
-    # Inject FlowEdit Default configuration (if config file is not defined)
-    _ensure_flowedit_cfg(cfg)
-
-    # Dense FlowEdit eval Fixed use 360 degree 8 Perspectives to avoid relying on sharing config the default eval Number of viewing angles.
-    cfg.data.eval.n_view = 8
-    cfg.data.eval.yaw_range = [0.0, 360.0]
-    cfg.data.eval.pitch_range = [0.0, 0.0]
+    # Canonical multi-view eval cameras when still at training-config defaults.
+    # Explicit CLI overrides (e.g. --config.data.eval.n_view=5) are preserved.
+    if int(cfg.data.eval.n_view) == 3 and list(cfg.data.eval.yaw_range) == [90.0, 270.0]:
+        cfg.data.eval.n_view = 8
+        cfg.data.eval.yaw_range = [0.0, 360.0]
+        cfg.data.eval.pitch_range = [0.0, 0.0]
 
     setup_env_and_seed(cfg)
     os.environ.setdefault("TORCH_NCCL_BLOCKING_WAIT", "1")
@@ -371,12 +275,7 @@ def main(argv) -> None:
     device = accelerator.device
     is_main = accelerator.is_main_process
 
-    fe_cfg = cfg.rollout.flowedit
-    logger.info(
-        f"[Rank {accelerator.process_index}] device={device} | "
-        f"FlowEdit steps={fe_cfg.steps} n_max={fe_cfg.n_max} "
-        f"cfg_tgt={fe_cfg.cfg_scale_tgt} cfg_src={fe_cfg.cfg_scale_src}"
-    )
+    logger.info(f"[Rank {accelerator.process_index}] device={device}")
     logger.info(
         f"[Rank {accelerator.process_index}] Eval camera | "
         f"n_view={cfg.data.eval.n_view} "
@@ -384,14 +283,11 @@ def main(argv) -> None:
         f"pitch_range={list(cfg.data.eval.pitch_range)}"
     )
 
-    # ---- data ----
     eval_loader = build_eval_dataloader(cfg, accelerator)
 
-    # ---- Build system ----
     system = build_system(cfg, accelerator, guidance_factory=create_guidance)
     system = system.prepare_lora(cfg, adapter="base", load_path=None, clone_from=None)
 
-    # ---- Load finetuned checkpoint ----
     ckpt_path = cfg.get("checkpoint", "")
     checkpoint_load_report: Optional[Dict[str, Any]] = None
     parameter_diff_reports: List[Dict[str, Any]] = []
@@ -427,25 +323,24 @@ def main(argv) -> None:
         for diff_report in parameter_diff_reports:
             logger.info("[ParamCheck] %s", json.dumps(diff_report, sort_keys=True))
     else:
-        logger.warning("[Checkpoint] unspecified checkpoint,student Use pretrained weight (with teacher same)")
+        logger.warning(
+            "[Checkpoint] no checkpoint specified; student uses pretrained weights "
+            "(same as teacher)"
+        )
 
-    # ---- Output directory ----
     run_root = Path(cfg.logdir) / (cfg.run_name or "run")
     ckpt_tag = Path(str(ckpt_path).rstrip("/")).name if ckpt_path else "pretrained_baseline"
-    # Distinguish this script from the standard eval
-    ckpt_tag = ckpt_tag + "_dense_flowedit"
     out_dir = run_root / "eval_teacher_student" / ckpt_tag
     images_dir = out_dir / "images"
     if is_main:
         out_dir.mkdir(parents=True, exist_ok=True)
         images_dir.mkdir(parents=True, exist_ok=True)
-        # record FlowEdit Operating parameters
-        with open(out_dir / "flowedit_params.json", "w") as f:
+        with open(out_dir / "eval_params.json", "w") as f:
             json.dump({
-                "steps": int(fe_cfg.steps),
-                "n_max": int(fe_cfg.n_max),
-                "cfg_scale_tgt": float(fe_cfg.cfg_scale_tgt),
-                "cfg_scale_src": float(fe_cfg.cfg_scale_src),
+                "pipeline": "dense_ode_sparse_ode",
+                "n_view": int(cfg.data.eval.n_view),
+                "yaw_range": list(cfg.data.eval.yaw_range),
+                "pitch_range": list(cfg.data.eval.pitch_range),
                 "checkpoint": ckpt_path,
                 "has_dense_ckpt": checkpoint_load_report is not None,
                 "checkpoint_load_report": checkpoint_load_report,
@@ -453,11 +348,9 @@ def main(argv) -> None:
             }, f, indent=2)
     _dist_barrier(local_rank)
 
-    # ---- Indicator model (lazy initialization)----
     clip_m: Optional[CLIPMetric] = None
     dino_m: Optional[DINOMetric] = None
 
-    # ---- Metrics recorder ----
     metric_keys = [
         "clip_teacher", "clip_student", "clip_delta",
         "dino_teacher", "dino_student", "dino_delta",
@@ -469,12 +362,11 @@ def main(argv) -> None:
     )
     if is_main and existing_rows:
         logger.info(
-            f"[Resume] Found that there is already CSV rows={len(existing_rows)},"
-            f"full sample={len(completed_names)}, the complete sample will be skipped and the make-up run will continue."
+            f"[Resume] existing CSV rows={len(existing_rows)}, "
+            f"complete samples={len(completed_names)}; skipping completed samples"
         )
     el = EvalMetricLogger(out_dir, metric_keys, accelerator, existing_rows=existing_rows)
 
-    # ---- evaluation loop ----
     pipe_models = system.pipeline.pipe.models
     inference_ctx = system.strategy.inference_context() if system.strategy else nullcontext()
 
@@ -498,32 +390,31 @@ def main(argv) -> None:
                 continue
 
             with torch.no_grad():
-                # === Student: Dense ODE + FlowEdit → Sparse ODE ===
+                # Student: Dense ODE -> Sparse ODE (finetuned weights)
                 state_stu = TrellisState()
                 state_stu.attach_batch(batch, pipeline=system.pipeline)
-                render_stu = trellis_forward_dense_flowedit(
+                render_stu = trellis_forward(
                     system, state_stu, cfg, device,
+                    global_step=0, is_training=False,
                 )
                 comp_rgb_stu = render_stu["color"]  # (B,V,H,W,C)
 
-                # === Teacher: Standard Dense ODE → Sparse ODE(pretrained weight)===
+                # Teacher: Dense ODE -> Sparse ODE (pretrained weights)
                 with system.strategy.sparse_teacher_context(), \
                      system.strategy.dense_teacher_context():
                     state_tea = TrellisState()
                     state_tea.attach_batch(batch, pipeline=system.pipeline)
-                    # Teacher always use your own dense model Regenerate coords(do not share student coords)
+                    # Always regenerate coords with the teacher dense model.
                     render_tea = trellis_forward(
                         system, state_tea, cfg, device,
                         global_step=0, is_training=False,
                     )
                 comp_rgb_tea = render_tea["color"]  # (B,V,H,W,C)
 
-            # ---- Lazy initialization indicator model ----
             if clip_m is None:
                 clip_m = CLIPMetric(weight=1.0, device=device)
                 dino_m = DINOMetric(weight=1.0, device=device)
 
-            # ---- Calculate indicators on a sample-by-sample basis + save image ----
             B, V = comp_rgb_stu.shape[:2]
             h, w = comp_rgb_stu.shape[2], comp_rgb_stu.shape[3]
             batch_rows: List[Dict[str, Any]] = []
@@ -571,14 +462,12 @@ def main(argv) -> None:
             del comp_rgb_stu, comp_rgb_tea
             torch.cuda.empty_cache()
 
-    # ---- Summary ----
     _dist_barrier(local_rank)
     avg = el.finalize()
 
     if is_main and avg:
         logger.info("=" * 60)
-        logger.info(f"[Dense FlowEdit Eval] steps={fe_cfg.steps} n_max={fe_cfg.n_max} "
-                    f"cfg_tgt={fe_cfg.cfg_scale_tgt} cfg_src={fe_cfg.cfg_scale_src}")
+        logger.info("[Teacher/Student Eval] Dense ODE -> Sparse ODE (no FlowEdit)")
         logger.info(
             f"CLIP:  teacher={avg['clip_teacher']:.4f}  "
             f"student={avg['clip_student']:.4f}  Δ={avg['clip_delta']:+.4f}"
